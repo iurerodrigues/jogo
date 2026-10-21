@@ -37,17 +37,31 @@ URL_JOGO = os.environ.get("URL_JOGO", "https://iurerodrigues.github.io/jogo/")
 BANCO = os.environ.get("BANCO", "/opt/bot/dados.db")
 PORTA = int(os.environ.get("PORTA", "8080"))
 ORIGENS = {"https://iurerodrigues.github.io"}
-VERSAO = "2.2"
+VERSAO = "2.4"
 
 # Precos em estrelas. Devem bater com PACOTES_VIP do jogo.
+# Pacotes de Cristais (moeda VIP) vendidos em Telegram Stars
 PACOTES = {
-    "amuleto1": {"titulo": "Amuleto da Sorte", "descricao": "30 exploracoes com 3x mais chance de feras raras.", "estrelas": 50},
-    "amuleto5": {"titulo": "Caixa de 5 Amuletos", "descricao": "150 exploracoes com sorte tripla.", "estrelas": 200},
-    "incenso3": {"titulo": "Kit Criador", "descricao": "3 Incensos de Ovo e 1 Menta da Natureza.", "estrelas": 75},
-    "cristal": {"titulo": "Cristal Perfeito", "descricao": "Deixa um IV no maximo.", "estrelas": 120},
-    "ultra10": {"titulo": "10 Ultra Esferas", "descricao": "Para cacar raras e lendarias.", "estrelas": 60},
-    "passe": {"titulo": "Passe VIP (30 dias)", "descricao": "Recompensa diaria em dobro e +25% de XP.", "estrelas": 300},
+    "cristais60": {"titulo": "60 Cristais", "descricao": "Moeda VIP para roupas, auras e itens especiais.", "estrelas": 50, "cristais": 60},
+    "cristais130": {"titulo": "130 Cristais", "descricao": "Moeda VIP (+8% de bonus).", "estrelas": 100, "cristais": 130},
+    "cristais700": {"titulo": "700 Cristais", "descricao": "Moeda VIP (+16% de bonus).", "estrelas": 500, "cristais": 700},
+    "cristais1500": {"titulo": "1500 Cristais", "descricao": "Moeda VIP (+25% de bonus).", "estrelas": 1000, "cristais": 1500},
 }
+
+# O que se compra com Cristais. Os precos ficam no servidor (o jogo so mostra).
+CATALOGO = {
+    "amuleto1": 60, "amuleto5": 240, "incenso3": 90, "ultra10": 70, "passe": 350,
+    "menta1": 40, "cristal": 150,
+    "roupaReal": 150, "roupaObsidiana": 200, "roupaEstelar": 250, "roupaPirata": 120,
+    "auraDourada": 120, "auraSombria": 120, "auraGelida": 120, "auraFlamejante": 120,
+}
+
+
+# Trocas entre jogadores
+ESPECIES_TROCAVEIS = set(["cinzor", "brasador", "infernor", "verdrax", "espinhador", "silvagor", "hidrax", "maregor", "leviator", "rasgor", "dentrax", "corvax", "gralhador", "falcorei", "lobrax", "lobrasa", "lobomar", "lobovolt", "lobosilva", "lobumbra", "vinhax", "constritor", "esporax", "micotar", "piranox", "tubarax", "krakel", "krakengor", "voltrix", "voltragon", "amperon", "tesloran", "gigavolt", "magmor", "caldeirax", "granor", "basaltor", "montanhor", "cascor", "cascalhao", "peconhar", "viperax", "basiliscor", "lodrax", "pestilar", "umbrax", "noctifer", "sombral", "eclipsor", "fagulhor", "pirotitan", "toupax", "escavor", "estalix", "trovoave", "ostrax", "perlador", "sapux", "coaxor", "morcelix", "vampirax", "lagartix", "salamandror", "geadax", "nevrak", "glaciaur", "criostal", "criogor", "brisax", "ventorax", "furacor", "zefiron", "ciclonar", "punhor", "golpeador", "brutamor", "gingar", "mestrax"])
+TAXA_TROCA = 0.10           # 10% do valor fica com o mercado (tira moedas de circulação)
+TROCA_VALIDADE = 24 * 3600  # oferta vence em 24 h
+MAX_OFERTAS_ABERTAS = 3
 
 
 def log(*partes):
@@ -108,6 +122,27 @@ def preparar_banco():
             campeao INTEGER NOT NULL DEFAULT 0,
             pontos INTEGER NOT NULL DEFAULT 0,
             atualizado INTEGER NOT NULL)""")
+        con.execute("""CREATE TABLE IF NOT EXISTS trocas (
+            codigo TEXT PRIMARY KEY,
+            de_uid INTEGER NOT NULL,
+            de_nome TEXT NOT NULL,
+            fera TEXT NOT NULL,
+            pede_tipo TEXT NOT NULL,
+            pede_valor INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'aberta',
+            para_uid INTEGER,
+            para_nome TEXT,
+            contra_fera TEXT,
+            criado INTEGER NOT NULL,
+            fechado INTEGER,
+            entregue_dono INTEGER NOT NULL DEFAULT 0)""")
+        con.execute("""CREATE TABLE IF NOT EXISTS bonus_diario (
+            uid INTEGER PRIMARY KEY,
+            ultimo TEXT NOT NULL,
+            sequencia INTEGER NOT NULL DEFAULT 0)""")
+        con.execute("""CREATE TABLE IF NOT EXISTS saldo (
+            uid INTEGER PRIMARY KEY,
+            cristais INTEGER NOT NULL DEFAULT 0)""")
 
 
 # ----------------------------------------------------------------------------
@@ -183,12 +218,38 @@ def registrar_pagamento(pagamento, uid):
         return None
     with _trava_banco, banco() as con:
         try:
-            con.execute("INSERT INTO compras (uid, pacote, estrelas, cobranca, criado) VALUES (?,?,?,?,?)",
+            # entregue=1: os Cristais entram no saldo na hora
+            con.execute("INSERT INTO compras (uid, pacote, estrelas, cobranca, criado, entregue) VALUES (?,?,?,?,?,1)",
                         (uid, partes[1], int(pagamento.get("total_amount", 0)),
                          pagamento.get("telegram_payment_charge_id", ""), int(time.time())))
+            creditar(con, uid, PACOTES[partes[1]]["cristais"])
         except sqlite3.IntegrityError:
             pass  # pagamento repetido: ja registrado
     return partes[1]
+
+
+def creditar(con, uid, qtd):
+    con.execute("INSERT INTO saldo (uid, cristais) VALUES (?, ?) ON CONFLICT(uid) DO UPDATE SET cristais = cristais + excluded.cristais", (uid, qtd))
+
+
+def ver_saldo(uid):
+    with _trava_banco, banco() as con:
+        l = con.execute("SELECT cristais FROM saldo WHERE uid=?", (uid,)).fetchone()
+    return l["cristais"] if l else 0
+
+
+def gastar(uid, item):
+    preco = CATALOGO.get(item)
+    if not preco:
+        raise ValueError("item invalido")
+    with _trava_banco, banco() as con:
+        cur = con.execute("UPDATE saldo SET cristais = cristais - ? WHERE uid=? AND cristais >= ?", (preco, uid, preco))
+        if cur.rowcount != 1:
+            raise ValueError("cristais insuficientes")
+        # a entrega vai pela mesma fila das compras: o jogo recebe em /api/resgatar
+        con.execute("INSERT INTO compras (uid, pacote, estrelas, cobranca, criado) VALUES (?,?,0,?,?)",
+                    (uid, item, "gasto:%d:%s:%f" % (uid, item, time.time()), int(time.time())))
+        return con.execute("SELECT cristais FROM saldo WHERE uid=?", (uid,)).fetchone()["cristais"]
 
 
 def resgatar(uid):
@@ -240,6 +301,176 @@ def posicao(uid):
 
 
 # ----------------------------------------------------------------------------
+# Trocas entre jogadores
+# fera compacta = [especie, level, xp, hp, variante, iv[4], ev[4], natureza, golpes, item, aura]
+# ----------------------------------------------------------------------------
+def validar_fera(f):
+    if not isinstance(f, list) or len(f) < 9:
+        raise ValueError("fera invalida")
+    esp, lv, xp, hp, var, iv, ev, nat, golpes = f[:9]
+    if esp not in ESPECIES_TROCAVEIS:
+        raise ValueError("essa fera nao pode ser trocada")
+    if not (isinstance(lv, int) and 1 <= lv <= 100) or not isinstance(xp, int) or xp < 0:
+        raise ValueError("nivel invalido")
+    if var not in ("", "s", "b"):
+        raise ValueError("variante invalida")
+    if not (isinstance(iv, list) and len(iv) == 4 and all(isinstance(x, int) and 0 <= x <= 31 for x in iv)):
+        raise ValueError("IV invalido")
+    if not (isinstance(ev, list) and len(ev) == 4 and all(isinstance(x, int) and 0 <= x <= 252 for x in ev) and sum(ev) <= 510):
+        raise ValueError("EV invalido")
+    if not (isinstance(nat, int) and 0 <= nat < 40):
+        raise ValueError("natureza invalida")
+    if not (isinstance(golpes, list) and 1 <= len(golpes) <= 4 and all(isinstance(g, str) and len(g) < 40 for g in golpes)):
+        raise ValueError("golpes invalidos")
+    extra = f[9:11]
+    for x in extra:
+        if not (x == 0 or x is None or (isinstance(x, str) and len(x) < 40)):
+            raise ValueError("item invalido")
+    return json.dumps(f[:11], separators=(",", ":"))
+
+
+def novo_codigo(con):
+    import random
+    letras = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    for _ in range(20):
+        c = "".join(random.choice(letras) for _ in range(6))
+        if not con.execute("SELECT 1 FROM trocas WHERE codigo=?", (c,)).fetchone():
+            return c
+    raise ValueError("tente de novo")
+
+
+def expirar_trocas(con):
+    con.execute("UPDATE trocas SET status='expirada', fechado=? WHERE status='aberta' AND criado < ?",
+                (int(time.time()), int(time.time()) - TROCA_VALIDADE))
+
+
+def nome_de(usuario, dados):
+    n = re.sub(r"[^\w .-]", "", re.sub(r"<[^>]*>", "", str(dados.get("nome") or "")), flags=re.UNICODE).strip()[:16]
+    return n if len(n) >= 3 else (usuario.get("first_name") or "Domador")[:24]
+
+
+def troca_publica(l):
+    return {"codigo": l["codigo"], "de": l["de_nome"], "fera": json.loads(l["fera"]), "pedeTipo": l["pede_tipo"],
+            "pedeValor": l["pede_valor"], "status": l["status"], "criado": l["criado"],
+            "para": l["para_nome"], "contraFera": json.loads(l["contra_fera"]) if l["contra_fera"] else None}
+
+
+def troca_criar(usuario, dados):
+    uid = usuario["id"]
+    fera = validar_fera(dados.get("fera"))
+    tipo = dados.get("pedeTipo")
+    if tipo not in ("fera", "moedas", "cristais"):
+        raise ValueError("pedido invalido")
+    valor = 0
+    if tipo == "moedas":
+        valor = _int(dados.get("pedeValor"), 1, 10000000)
+    elif tipo == "cristais":
+        valor = _int(dados.get("pedeValor"), 1, 100000)
+    with _trava_banco, banco() as con:
+        expirar_trocas(con)
+        abertas = con.execute("SELECT COUNT(*) FROM trocas WHERE de_uid=? AND status='aberta'", (uid,)).fetchone()[0]
+        if abertas >= MAX_OFERTAS_ABERTAS:
+            raise ValueError("voce ja tem 3 ofertas abertas")
+        cod = novo_codigo(con)
+        con.execute("INSERT INTO trocas (codigo, de_uid, de_nome, fera, pede_tipo, pede_valor, criado) VALUES (?,?,?,?,?,?,?)",
+                    (cod, uid, nome_de(usuario, dados), fera, tipo, valor, int(time.time())))
+    return cod
+
+
+def troca_ver(uid, codigo):
+    with _trava_banco, banco() as con:
+        expirar_trocas(con)
+        l = con.execute("SELECT * FROM trocas WHERE codigo=?", (str(codigo).upper().strip()[:8],)).fetchone()
+    if not l or l["status"] != "aberta":
+        raise ValueError("codigo invalido ou oferta encerrada")
+    t = troca_publica(l)
+    t["minha"] = l["de_uid"] == uid
+    return t
+
+
+def troca_aceitar(usuario, dados):
+    uid = usuario["id"]
+    codigo = str(dados.get("codigo", "")).upper().strip()[:8]
+    with _trava_banco, banco() as con:
+        expirar_trocas(con)
+        l = con.execute("SELECT * FROM trocas WHERE codigo=?", (codigo,)).fetchone()
+        if not l or l["status"] != "aberta":
+            raise ValueError("codigo invalido ou oferta encerrada")
+        if l["de_uid"] == uid:
+            raise ValueError("voce nao pode aceitar a propria oferta")
+        contra = None
+        if l["pede_tipo"] == "fera":
+            contra = validar_fera(dados.get("fera"))
+        elif l["pede_tipo"] == "cristais":
+            preco = l["pede_valor"]
+            cur = con.execute("UPDATE saldo SET cristais = cristais - ? WHERE uid=? AND cristais >= ?", (preco, uid, preco))
+            if cur.rowcount != 1:
+                raise ValueError("cristais insuficientes")
+            creditar(con, l["de_uid"], int(preco * (1 - TAXA_TROCA)))
+        # moedas: o jogo de quem compra desconta; o vendedor recebe ao resgatar
+        cur = con.execute("UPDATE trocas SET status='concluida', para_uid=?, para_nome=?, contra_fera=?, fechado=? WHERE codigo=? AND status='aberta'",
+                          (uid, nome_de(usuario, dados), contra, int(time.time()), codigo))
+        if cur.rowcount != 1:
+            raise ValueError("oferta encerrada")
+        return {"fera": json.loads(l["fera"]), "pedeTipo": l["pede_tipo"], "pedeValor": l["pede_valor"],
+                "cristais": ver_saldo_con(con, uid)}
+
+
+def ver_saldo_con(con, uid):
+    l = con.execute("SELECT cristais FROM saldo WHERE uid=?", (uid,)).fetchone()
+    return l["cristais"] if l else 0
+
+
+def bonus_cristais(uid):
+    """Todo mundo ganha Cristais grátis uma vez por dia: 1 por dia, 5 no 7º dia seguido."""
+    hoje = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 3 * 3600))
+    ontem = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 27 * 3600))
+    with _trava_banco, banco() as con:
+        l = con.execute("SELECT ultimo, sequencia FROM bonus_diario WHERE uid=?", (uid,)).fetchone()
+        if l and l["ultimo"] == hoje:
+            return 0, l["sequencia"], ver_saldo_con(con, uid)
+        seq = (l["sequencia"] + 1) if l and l["ultimo"] == ontem else 1
+        ganho = 5 if seq % 7 == 0 else 1
+        con.execute("INSERT INTO bonus_diario (uid, ultimo, sequencia) VALUES (?,?,?) ON CONFLICT(uid) DO UPDATE SET ultimo=excluded.ultimo, sequencia=excluded.sequencia", (uid, hoje, seq))
+        creditar(con, uid, ganho)
+        return ganho, seq, ver_saldo_con(con, uid)
+
+
+def troca_cancelar(uid, codigo):
+    with _trava_banco, banco() as con:
+        cur = con.execute("UPDATE trocas SET status='cancelada', fechado=? WHERE codigo=? AND de_uid=? AND status='aberta'",
+                          (int(time.time()), str(codigo).upper().strip()[:8], uid))
+        if cur.rowcount != 1:
+            raise ValueError("oferta nao pode ser cancelada")
+        # a fera volta pelo /api/troca/minhas (entrega pendente)
+
+
+def troca_minhas(uid):
+    """Lista as ofertas do jogador e entrega o que ele tem a receber (uma única vez)."""
+    entregas = []
+    with _trava_banco, banco() as con:
+        expirar_trocas(con)
+        pendentes = con.execute("SELECT * FROM trocas WHERE de_uid=? AND status IN ('concluida','cancelada','expirada') AND entregue_dono=0", (uid,)).fetchall()
+        for l in pendentes:
+            if l["status"] == "concluida":
+                if l["pede_tipo"] == "fera":
+                    entregas.append({"tipo": "fera", "fera": json.loads(l["contra_fera"]), "codigo": l["codigo"], "de": l["para_nome"]})
+                elif l["pede_tipo"] == "moedas":
+                    entregas.append({"tipo": "moedas", "valor": int(l["pede_valor"] * (1 - TAXA_TROCA)), "codigo": l["codigo"], "de": l["para_nome"]})
+                else:
+                    entregas.append({"tipo": "cristais", "valor": int(l["pede_valor"] * (1 - TAXA_TROCA)), "codigo": l["codigo"], "de": l["para_nome"]})
+            else:
+                entregas.append({"tipo": "devolvida", "fera": json.loads(l["fera"]), "codigo": l["codigo"], "motivo": l["status"]})
+        if pendentes:
+            con.executemany("UPDATE trocas SET entregue_dono=1 WHERE codigo=?", [(l["codigo"],) for l in pendentes])
+        abertas = con.execute("SELECT * FROM trocas WHERE de_uid=? AND status='aberta' ORDER BY criado DESC", (uid,)).fetchall()
+        historico = con.execute("SELECT * FROM trocas WHERE (de_uid=? OR para_uid=?) AND status!='aberta' ORDER BY fechado DESC LIMIT 10", (uid, uid)).fetchall()
+        saldo = ver_saldo_con(con, uid)
+    return {"entregas": entregas, "abertas": [troca_publica(l) for l in abertas],
+            "historico": [troca_publica(l) for l in historico], "cristais": saldo}
+
+
+# ----------------------------------------------------------------------------
 # Bot (long polling)
 # ----------------------------------------------------------------------------
 def tratar_mensagem(msg):
@@ -248,7 +479,7 @@ def tratar_mensagem(msg):
     if "successful_payment" in msg:
         pacote = registrar_pagamento(msg["successful_payment"], usuario.get("id"))
         nome = PACOTES.get(pacote, {}).get("titulo", "seu pacote")
-        enviar(chat, "⭐ Pagamento confirmado! %s já está esperando por você no jogo.\n\nAbra o jogo para receber." % nome, teclado_jogar())
+        enviar(chat, "💎 Pagamento confirmado! %s foram adicionados à sua conta.\n\nSaldo atual: %d Cristais." % (nome, ver_saldo(usuario.get("id"))), teclado_jogar())
         log("pagamento", usuario.get("id"), pacote)
         return
     texto = (msg.get("text") or "").strip()
@@ -379,7 +610,30 @@ class Api(BaseHTTPRequestHandler):
             if self.path.startswith("/api/fatura"):
                 return self._json(200, {"ok": True, "link": criar_fatura(uid, corpo.get("pacote", ""))})
             if self.path.startswith("/api/resgatar"):
-                return self._json(200, {"ok": True, "pacotes": resgatar(uid)})
+                return self._json(200, {"ok": True, "pacotes": resgatar(uid), "cristais": ver_saldo(uid)})
+            if self.path.startswith("/api/saldo"):
+                return self._json(200, {"ok": True, "cristais": ver_saldo(uid)})
+            if self.path.startswith("/api/gastar"):
+                restante = gastar(uid, str(corpo.get("item", "")))
+                return self._json(200, {"ok": True, "cristais": restante})
+            if self.path.startswith("/api/cristais/diario"):
+                ganho, seq, saldo = bonus_cristais(uid)
+                return self._json(200, {"ok": True, "ganho": ganho, "sequencia": seq, "cristais": saldo})
+            if self.path.startswith("/api/troca/criar"):
+                return self._json(200, {"ok": True, "codigo": troca_criar(usuario, corpo)})
+            if self.path.startswith("/api/troca/ver"):
+                return self._json(200, {"ok": True, "troca": troca_ver(uid, corpo.get("codigo", ""))})
+            if self.path.startswith("/api/troca/aceitar"):
+                r = troca_aceitar(usuario, corpo)
+                r["ok"] = True
+                return self._json(200, r)
+            if self.path.startswith("/api/troca/cancelar"):
+                troca_cancelar(uid, corpo.get("codigo", ""))
+                return self._json(200, {"ok": True})
+            if self.path.startswith("/api/troca/minhas"):
+                r = troca_minhas(uid)
+                r["ok"] = True
+                return self._json(200, r)
             if self.path.startswith("/api/ranking"):
                 pontos = salvar_ranking(usuario, corpo.get("dados") or {})
                 return self._json(200, {"ok": True, "pontos": pontos, "posicao": posicao(uid)})
