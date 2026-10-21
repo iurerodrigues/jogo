@@ -18,6 +18,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -36,7 +37,7 @@ URL_JOGO = os.environ.get("URL_JOGO", "https://iurerodrigues.github.io/jogo/")
 BANCO = os.environ.get("BANCO", "/opt/bot/dados.db")
 PORTA = int(os.environ.get("PORTA", "8080"))
 ORIGENS = {"https://iurerodrigues.github.io"}
-VERSAO = "2.1"
+VERSAO = "2.2"
 
 # Precos em estrelas. Devem bater com PACOTES_VIP do jogo.
 PACOTES = {
@@ -206,7 +207,8 @@ def _int(v, minimo, maximo):
 
 
 def salvar_ranking(usuario, dados):
-    nome = (usuario.get("first_name") or "Domador")[:24]
+    apelido = re.sub(r"[^\w .-]", "", re.sub(r"<[^>]*>", "", str(dados.get("nome") or "")), flags=re.UNICODE).strip()[:16]
+    nome = apelido if len(apelido) >= 3 else (usuario.get("first_name") or "Domador")[:24]
     nivel = _int(dados.get("nivel"), 1, 100)
     insignias = _int(dados.get("insignias"), 0, 8)
     bestiario = _int(dados.get("bestiario"), 0, 500)
