@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Monstros de Bolso</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+  /* ================= TEMA (cores nativas do Telegram + reserva) ================= */
+  :root {
+    --fb-bg: #f4f1ea;
+    --fb-text: #1d1b18;
+    --fb-hint: #8a857c;
+    --fb-btn: #e2483d;
+    --fb-btn-text: #ffffff;
+    --fb-card: #ffffff;
+
+    --bg: var(--tg-theme-bg-color, var(--fb-bg));
+    --text: var(--tg-theme-text-color, var(--fb-text));
+    --hint: var(--tg-theme-hint-color, var(--fb-hint));
+    --btn: var(--tg-theme-button-color, var(--fb-btn));
+    --btn-text: var(--tg-theme-button-text-color, var(--fb-btn-text));
+    --card: var(--tg-theme-secondary-bg-color, var(--fb-card));
+
+    --hp-verde: #3cb371;
+    --hp-amarelo: #f0b429;
+    --hp-vermelho: #e5484d;
+    --log-bg: #15171c;
+    --log-text: #e9f5e1;
+    --sombra: 0 2px 10px rgba(0, 0, 0, .08);
+    --raio: 12px;
+    --barra-h: 64px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fb-bg: #17181c;
+      --fb-text: #f1efe9;
+      --fb-hint: #8e8c87;
+      --fb-card: #22242a;
+    }
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Nunito", system-ui, -apple-system, sans-serif;
+    font-size: 15px;
+    overscroll-behavior: none;
+    user-select: none;
+  }
+
+  /* ================= ESTRUTURA ================= */
+  #app {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 16px 16px calc(var(--barra-h) + 24px + env(safe-area-inset-bottom));
+    min-height: 100%;
+  }
+  .tela { display: none; flex-direction: column; gap: 14px; animation: entrar .22s ease; }
+  .tela.ativa { display: flex; }
+  @keyframes entrar { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  .card {
+    background: var(--card);
+    border-radius: var(--raio);
+    box-shadow: var(--sombra);
+    padding: 14px;
+  }
+  .pixel { font-family: "Press Start 2P", monospace; letter-spacing: .5px; }
+  .titulo-secao { font-size: 11px; color: var(--hint); text-transform: uppercase; margin: 6px 2px 0; }
+
+  /* ================= BOTÕES ================= */
+  button {
+    font: inherit;
+    color: inherit;
+    border: none;
+    cursor: pointer;
+    transition: transform .12s ease, filter .12s ease, opacity .12s ease;
+  }
+  button:active { transform: scale(0.96); }
+  button:disabled { opacity: .45; pointer-events: none; }
+
+  .btn-principal {
+    background: var(--btn);
+    color: var(--btn-text);
+    border-radius: var(--raio);
+    box-shadow: var(--sombra);
+    font-weight: 800;
+  }
+
+  /* ================= ABA 1: EXPLORAÇÃO ================= */
+  .treinador { display: flex; align-items: center; gap: 12px; }
+  .avatar {
+    width: 48px; height: 48px; border-radius: 50%;
+    background: var(--btn); color: var(--btn-text);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; flex-shrink: 0;
+  }
+  .treinador-info { flex: 1; min-width: 0; }
+  .treinador-nome { font-weight: 800; font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .treinador-stats { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+  .chip {
+    font-size: 12px; font-weight: 700;
+    padding: 4px 10px; border-radius: 999px;
+    background: color-mix(in srgb, var(--text) 8%, transparent);
+  }
+
+  .lider { display: flex; align-items: center; gap: 14px; }
+  .lider-sprite {
+    width: 96px; height: 96px; flex-shrink: 0;
+    border-radius: var(--raio);
+    background: color-mix(in srgb, var(--btn) 10%, transparent);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .lider-sprite svg { width: 84px; height: 84px; animation: respirar 2.4s ease-in-out infinite; }
+  .lider-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  .lider-rotulo { font-size: 9px; color: var(--hint); }
+  .lider-nome { font-weight: 800; font-size: 18px; }
+
+  .rotas { display: flex; flex-direction: column; gap: 10px; }
+  .rota {
+    width: 100%;
+    display: flex; align-items: center; gap: 14px;
+    padding: 16px 18px;
+    border-radius: var(--raio);
+    background: var(--card);
+    box-shadow: var(--sombra);
+    text-align: left;
+    border-left: 6px solid var(--cor-rota);
+  }
+  .rota-icone { font-size: 26px; }
+  .rota-texto { flex: 1; }
+  .rota-nome { font-weight: 800; font-size: 17px; }
+  .rota-desc { font-size: 12px; color: var(--hint); margin-top: 2px; }
+  .rota-seta { color: var(--hint); font-size: 20px; }
+  .rota.buscando .rota-seta { animation: girar .6s linear infinite; }
+  @keyframes girar { to { transform: rotate(360deg); } }
+
+  /* ================= BARRA DE VIDA ================= */
+  .hp-linha { display: flex; align-items: center; gap: 8px; }
+  .hp-rotulo { font-size: 9px; font-weight: 800; color: var(--hint); }
+  .hp-barra {
+    flex: 1; height: 10px; border-radius: 999px;
+    background: color-mix(in srgb, var(--text) 12%, transparent);
+    overflow: hidden;
+  }
+  .hp-preenchimento {
+    height: 100%; width: 100%; border-radius: 999px;
+    background: var(--hp-verde);
+    transition: width .45s ease, background-color .45s ease;
+  }
+  .hp-num { font-size: 12px; font-weight: 800; min-width: 54px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* ================= ABA 2: BATALHA ================= */
+  .inimigo-topo { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+  .inimigo-nome { font-weight: 800; font-size: 18px; }
+  .tipo-tag {
+    font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px;
+    color: #fff; margin-left: 6px; vertical-align: middle;
+  }
+
+  .arena {
+    position: relative;
+    height: 190px;
+    display: flex; align-items: flex-end; justify-content: center;
+    border-radius: var(--raio);
+    background: linear-gradient(to bottom, transparent 55%, color-mix(in srgb, var(--cor-arena, #3cb371) 18%, transparent) 55%);
+  }
+  .arena::after {
+    content: ""; position: absolute; bottom: 14px; left: 50%;
+    width: 150px; height: 22px; transform: translateX(-50%);
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--text) 12%, transparent);
+  }
+  .arena svg { width: 160px; height: 160px; position: relative; z-index: 1; animation: respirar 2s ease-in-out infinite; }
+  @keyframes respirar { 50% { transform: translateY(-4px) scaleY(1.02); } }
+  .arena.dano svg { animation: tremer .35s ease; }
+  @keyframes tremer { 20%, 60% { transform: translateX(-8px); filter: brightness(1.8); } 40%, 80% { transform: translateX(8px); } }
+  .arena.capturando svg { animation: encolher .5s ease forwards; }
+  @keyframes encolher { to { transform: scale(0); opacity: 0; } }
+  .arena.escapou svg { animation: voltar .4s ease; }
+  @keyframes voltar { from { transform: scale(0); opacity: 0; } }
+
+  .log {
+    background: var(--log-bg);
+    color: var(--log-text);
+    border-radius: var(--raio);
+    padding: 12px 14px;
+    height: 96px;
+    overflow-y: auto;
+    font-size: 10px;
+    line-height: 1.7;
+    box-shadow: inset 0 0 0 3px rgba(255, 255, 255, .06);
+  }
+  .log p { opacity: .55; }
+  .log p:last-child { opacity: 1; }
+  .log p:last-child::before { content: "▶ "; color: #ffd166; }
+
+  .ataques { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .ataque {
+    padding: 12px 10px;
+    border-radius: var(--raio);
+    background: var(--card);
+    box-shadow: var(--sombra);
+    border-bottom: 4px solid var(--cor-tipo);
+    display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  }
+  .ataque-nome { font-weight: 800; font-size: 15px; }
+  .ataque-info { font-size: 11px; color: var(--hint); }
+
+  .utilitarios { display: flex; gap: 10px; }
+  .utilitarios button { flex: 1; padding: 14px; font-size: 15px; }
+  .btn-fugir {
+    background: var(--card); border-radius: var(--raio); box-shadow: var(--sombra); font-weight: 800;
+  }
+
+  /* ================= EQUIPE / BOX ================= */
+  .lista { display: flex; flex-direction: column; gap: 10px; }
+  .monstro-item { display: flex; align-items: center; gap: 12px; }
+  .monstro-item svg { width: 56px; height: 56px; flex-shrink: 0; }
+  .monstro-item .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  .monstro-item .nome { font-weight: 800; }
+  .monstro-item .acao {
+    font-size: 12px; font-weight: 800; padding: 8px 10px; border-radius: 10px;
+    background: color-mix(in srgb, var(--btn) 14%, transparent); color: var(--btn);
+  }
+  .grade-box { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .box-item { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 6px; }
+  .box-item svg { width: 60px; height: 60px; }
+  .box-item .nome { font-weight: 800; font-size: 13px; }
+  .box-item .lv { font-size: 11px; color: var(--hint); }
+  .vazio { text-align: center; color: var(--hint); padding: 28px 12px; line-height: 1.5; }
+
+  /* ================= BARRA INFERIOR FIXA ================= */
+  .barra-inferior {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    height: calc(var(--barra-h) + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+    background: var(--card);
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, .08);
+    display: flex; justify-content: center;
+    z-index: 10;
+  }
+  .barra-inferior .interno { display: flex; width: 100%; max-width: 480px; }
+  .aba {
+    flex: 1; background: none;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    color: var(--hint); font-size: 11px; font-weight: 800;
+  }
+  .aba .icone { font-size: 22px; filter: grayscale(1); opacity: .7; transition: filter .15s, opacity .15s, transform .15s; }
+  .aba.ativa { color: var(--btn); }
+  .aba.ativa .icone { filter: none; opacity: 1; transform: translateY(-2px); }
+
+  /* ================= AVISO (toast) ================= */
+  .toast {
+    position: fixed; left: 50%; bottom: calc(var(--barra-h) + 16px + env(safe-area-inset-bottom));
+    transform: translate(-50%, 20px); opacity: 0;
+    background: var(--log-bg); color: var(--log-text);
+    padding: 10px 16px; border-radius: 999px; font-size: 13px; font-weight: 700;
+    transition: opacity .2s, transform .2s; pointer-events: none; z-index: 20;
+    white-space: nowrap;
+  }
+  .toast.visivel { opacity: 1; transform: translate(-50%, 0); }
+</style>
+</head>
+<body>
+
+<main id="app">
+
+  <!-- ===================== ABA 1: EXPLORAÇÃO ===================== -->
+  <section id="tela-explorar" class="tela ativa">
+    <div class="card treinador">
+      <div class="avatar pixel" id="treinador-avatar">?</div>
+      <div class="treinador-info">
+        <div class="treinador-nome" id="treinador-nome">Treinador</div>
+        <div class="treinador-stats">
+          <span class="chip">⭐ Lv <span id="treinador-level">1</span></span>
+          <span class="chip">💰 <span id="treinador-dinheiro">0</span></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card lider">
+      <div class="lider-sprite" id="lider-sprite"></div>
+      <div class="lider-info">
+        <span class="lider-rotulo pixel">LÍDER</span>
+        <span class="lider-nome" id="lider-nome">—</span>
+        <span class="chip" style="align-self:flex-start" id="lider-level">Lv 1</span>
+        <div class="hp-linha">
+          <span class="hp-rotulo pixel">HP</span>
+          <div class="hp-barra"><div class="hp-preenchimento" id="lider-hp-barra"></div></div>
+          <span class="hp-num" id="lider-hp-num">0/0</span>
+        </div>
+      </div>
+    </div>
+
+    <h2 class="titulo-secao pixel">Rotas de Exploração</h2>
+    <div class="rotas">
+      <button class="rota" style="--cor-rota:#3cb371" onclick="procurarMonstro('mato', this)">
+        <span class="rota-icone">🌿</span>
+        <span class="rota-texto"><span class="rota-nome">Mato</span><span class="rota-desc" style="display:block">Monstros de planta</span></span>
+        <span class="rota-seta">›</span>
+      </button>
+      <button class="rota" style="--cor-rota:#a0785a" onclick="procurarMonstro('caverna', this)">
+        <span class="rota-icone">⛰️</span>
+        <span class="rota-texto"><span class="rota-nome">Caverna</span><span class="rota-desc" style="display:block">Monstros de rocha</span></span>
+        <span class="rota-seta">›</span>
+      </button>
+      <button class="rota" style="--cor-rota:#3a8ee6" onclick="procurarMonstro('agua', this)">
+        <span class="rota-icone">💧</span>
+        <span class="rota-texto"><span class="rota-nome">Água</span><span class="rota-desc" style="display:block">Monstros aquáticos</span></span>
+        <span class="rota-seta">›</span>
+      </button>
+    </div>
+  </section>
+
+  <!-- ===================== ABA 2: BATALHA ===================== -->
+  <section id="tela-batalha" class="tela">
+    <div class="card">
+      <div class="inimigo-topo">
+        <div><span class="inimigo-nome" id="inimigo-nome">—</span><span class="tipo-tag" id="inimigo-tipo"></span></div>
+        <span class="chip" id="inimigo-level">Lv 1</span>
+      </div>
+      <div class="hp-linha">
+        <span class="hp-rotulo pixel">HP</span>
+        <div class="hp-barra"><div class="hp-preenchimento" id="inimigo-hp-barra"></div></div>
+        <span class="hp-num" id="inimigo-hp-num">0/0</span>
+      </div>
+    </div>
+
+    <div class="arena" id="arena"></div>
+
+    <div class="log pixel" id="log"></div>
+
+    <div class="ataques" id="ataques"></div>
+
+    <div class="utilitarios">
+      <button class="btn-principal" id="btn-capturar" onclick="tentarCaptura()">🔴 Capturar</button>
+      <button class="btn-fugir" id="btn-fugir" onclick="fugir()">🏃 Fugir</button>
+    </div>
+  </section>
+
+  <!-- ===================== EQUIPE ===================== -->
+  <section id="tela-equipe" class="tela">
+    <h2 class="titulo-secao pixel">Sua Equipe</h2>
+    <div class="lista" id="lista-equipe"></div>
+  </section>
+
+  <!-- ===================== BOX ===================== -->
+  <section id="tela-box" class="tela">
+    <h2 class="titulo-secao pixel">Box</h2>
+    <div class="grade-box" id="grade-box"></div>
+  </section>
+
+</main>
+
+<!-- ===================== BARRA INFERIOR FIXA ===================== -->
+<nav class="barra-inferior">
+  <div class="interno">
+    <button class="aba ativa" data-aba="explorar" onclick="trocarAba('explorar')"><span class="icone">🧭</span>Explorar</button>
+    <button class="aba" data-aba="equipe" onclick="trocarAba('equipe')"><span class="icone">👥</span>Equipe</button>
+    <button class="aba" data-aba="box" onclick="trocarAba('box')"><span class="icone">📦</span>Box</button>
+  </div>
+</nav>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ======================================================================
+   INICIALIZAÇÃO DO TELEGRAM
+   ====================================================================== */
+const tg = window.Telegram ? window.Telegram.WebApp : null;
+if (tg) {
+  tg.ready();
+  tg.expand();
+  if (tg.setHeaderColor) { try { tg.setHeaderColor('bg_color'); } catch (e) {} }
+}
+
+function vibrar(tipo) {
+  try {
+    if (!tg || !tg.HapticFeedback) return;
+    if (tipo === 'leve') tg.HapticFeedback.impactOccurred('light');
+    else if (tipo === 'forte') tg.HapticFeedback.impactOccurred('heavy');
+    else if (tipo === 'sucesso') tg.HapticFeedback.notificationOccurred('success');
+    else if (tipo === 'erro') tg.HapticFeedback.notificationOccurred('error');
+  } catch (e) {}
+}
+
+/* ======================================================================
+   DADOS DO JOGO (temporários: depois virão do servidor Python)
+   ====================================================================== */
+const TIPOS = {
+  planta: { nome: 'Planta', cor: '#3cb371' },
+  fogo:   { nome: 'Fogo',   cor: '#f0703a' },
+  agua:   { nome: 'Água',   cor: '#3a8ee6' },
+  rocha:  { nome: 'Rocha',  cor: '#a0785a' },
+  normal: { nome: 'Normal', cor: '#9a9a9a' }
+};
+
+// Quem vence quem (multiplicador 2x)
+const VANTAGENS = { fogo: ['planta'], agua: ['fogo', 'rocha'], planta: ['agua', 'rocha'], rocha: ['fogo'] };
+
+const ESPECIES = {
+  brasilho:  { nome: 'Brasilho',  tipo: 'fogo',   cor: '#f58b4c', forma: 1 },
+  brotinho:  { nome: 'Brotinho',  tipo: 'planta', cor: '#7cc56f', forma: 0 },
+  folhux:    { nome: 'Folhux',    tipo: 'planta', cor: '#b5d96a', forma: 2 },
+  ramilo:    { nome: 'Ramilo',    tipo: 'planta', cor: '#5fae8b', forma: 1 },
+  pedrolho:  { nome: 'Pedrolho',  tipo: 'rocha',  cor: '#b9a48c', forma: 0 },
+  cascalho:  { nome: 'Cascalho',  tipo: 'rocha',  cor: '#8f8a83', forma: 2 },
+  gotarel:   { nome: 'Gotarel',   tipo: 'agua',   cor: '#6fb6f2', forma: 0 },
+  marolito:  { nome: 'Marolito',  tipo: 'agua',   cor: '#5ad1c8', forma: 2 }
+};
+
+const ROTAS = {
+  mato:    { especies: ['brotinho', 'folhux', 'ramilo'], niveis: [2, 5], cor: '#3cb371' },
+  caverna: { especies: ['pedrolho', 'cascalho'],         niveis: [3, 6], cor: '#a0785a' },
+  agua:    { especies: ['gotarel', 'marolito'],          niveis: [3, 6], cor: '#3a8ee6' }
+};
+
+const GOLPES = {
+  fogo:   [{ nome: 'Brasa', tipo: 'fogo', poder: 9 },  { nome: 'Labareda', tipo: 'fogo', poder: 13, precisao: .8 }],
+  planta: [{ nome: 'Chicote', tipo: 'planta', poder: 9 }, { nome: 'Folha Navalha', tipo: 'planta', poder: 13, precisao: .8 }],
+  agua:   [{ nome: 'Jato d\'Água', tipo: 'agua', poder: 9 }, { nome: 'Onda', tipo: 'agua', poder: 13, precisao: .8 }],
+  rocha:  [{ nome: 'Pedrada', tipo: 'rocha', poder: 9 }, { nome: 'Deslizamento', tipo: 'rocha', poder: 13, precisao: .8 }],
+  normal: [{ nome: 'Investida', tipo: 'normal', poder: 7 }, { nome: 'Arranhão', tipo: 'normal', poder: 6 }]
+};
+
+let estado = {
+  treinador: { nome: 'Treinador', level: 1, xp: 0, dinheiro: 500 },
+  equipe: [],
+  box: [],
+  batalha: null
+};
+
+/* ======================================================================
+   UTILITÁRIOS
+   ====================================================================== */
+const $ = (id) => document.getElementById(id);
+const aleatorio = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+const escolher = (lista) => lista[Math.floor(Math.random() * lista.length)];
+const esperar = (ms) => new Promise(r => setTimeout(r, ms));
+
+function hpMaximo(level) { return 18 + level * 5; }
+
+function criarMonstro(especieId, level) {
+  const esp = ESPECIES[especieId];
+  const hp = hpMaximo(level);
+  return {
+    id: Date.now() + Math.random(),
+    especie: especieId, nome: esp.nome, tipo: esp.tipo, cor: esp.cor, forma: esp.forma,
+    level, hp, hpMax: hp,
+    golpes: [...GOLPES[esp.tipo], ...GOLPES.normal]
+  };
+}
+
+function corHP(pct) {
+  if (pct > 50) return 'var(--hp-verde)';
+  if (pct > 20) return 'var(--hp-amarelo)';
+  return 'var(--hp-vermelho)';
+}
+
+function htmlBarraHP(m) {
+  const pct = Math.max(0, Math.round(m.hp / m.hpMax * 100));
+  return `<div class="hp-linha"><span class="hp-rotulo pixel">HP</span>
+    <div class="hp-barra"><div class="hp-preenchimento" style="width:${pct}%;background:${corHP(pct)}"></div></div>
+    <span class="hp-num">${m.hp}/${m.hpMax}</span></div>`;
+}
+
+function atualizarBarra(barraId, numId, m) {
+  const pct = Math.max(0, Math.round(m.hp / m.hpMax * 100));
+  $(barraId).style.width = pct + '%';
+  $(barraId).style.backgroundColor = corHP(pct);
+  $(numId).textContent = `${m.hp}/${m.hpMax}`;
+}
+
+let toastTimer;
+function aviso(texto) {
+  const t = $('toast');
+  t.textContent = texto;
+  t.classList.add('visivel');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('visivel'), 1800);
+}
+
+/* ======================================================================
+   SPRITES (monstros originais desenhados em SVG)
+   ====================================================================== */
+function escurecer(hex, f) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.round(((n >> 16) & 255) * f), g = Math.round(((n >> 8) & 255) * f), b = Math.round((n & 255) * f);
+  return `rgb(${r},${g},${b})`;
+}
+
+function sprite(m) {
+  const contorno = '#1d1b18';
+  const corpo = m.cor;
+  const sombra = escurecer(corpo, .78);
+  let enfeite = '';
+
+  if (m.tipo === 'planta') {
+    enfeite = `<path d="M60 34 Q58 22 62 14" stroke="${contorno}" stroke-width="4" fill="none" stroke-linecap="round"/>
+      <path d="M62 16 C74 4 92 10 88 24 C78 28 68 26 62 16Z" fill="#3f9b4a" stroke="${contorno}" stroke-width="4" stroke-linejoin="round"/>`;
+  } else if (m.tipo === 'fogo') {
+    enfeite = `<path d="M60 8 C72 20 76 30 68 40 C66 32 60 32 58 38 C48 30 50 18 60 8Z" fill="#ffb02e" stroke="${contorno}" stroke-width="4" stroke-linejoin="round"/>
+      <path d="M60 22 C64 28 64 33 62 36 C60 33 58 32 57 34 C55 30 56 26 60 22Z" fill="#ffe08a"/>`;
+  } else if (m.tipo === 'agua') {
+    enfeite = `<path d="M50 40 L60 12 L72 40Z" fill="#9fd4ff" stroke="${contorno}" stroke-width="4" stroke-linejoin="round"/>`;
+  } else if (m.tipo === 'rocha') {
+    enfeite = `<path d="M36 44 L42 24 L52 40Z M54 38 L62 16 L70 38Z M68 40 L80 26 L84 46Z" fill="#7d7268" stroke="${contorno}" stroke-width="4" stroke-linejoin="round"/>`;
+  }
+
+  let orelhas = '';
+  if (m.forma === 1) {
+    orelhas = `<path d="M32 52 L24 30 L46 42Z M88 52 L96 30 L74 42Z" fill="${corpo}" stroke="${contorno}" stroke-width="4" stroke-linejoin="round"/>`;
+  } else if (m.forma === 2) {
+    orelhas = `<ellipse cx="26" cy="64" rx="8" ry="12" fill="${sombra}" stroke="${contorno}" stroke-width="4"/>
+      <ellipse cx="94" cy="64" rx="8" ry="12" fill="${sombra}" stroke="${contorno}" stroke-width="4"/>`;
+  }
+
+  return `<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" aria-label="${m.nome}">
+    ${orelhas}
+    ${enfeite}
+    <ellipse cx="44" cy="104" rx="11" ry="7" fill="${sombra}" stroke="${contorno}" stroke-width="4"/>
+    <ellipse cx="76" cy="104" rx="11" ry="7" fill="${sombra}" stroke="${contorno}" stroke-width="4"/>
+    <ellipse cx="60" cy="72" rx="36" ry="32" fill="${corpo}" stroke="${contorno}" stroke-width="4"/>
+    <ellipse cx="60" cy="84" rx="20" ry="14" fill="#fff" opacity=".45"/>
+    <ellipse cx="46" cy="64" rx="7" ry="9" fill="#fff" stroke="${contorno}" stroke-width="3"/>
+    <ellipse cx="74" cy="64" rx="7" ry="9" fill="#fff" stroke="${contorno}" stroke-width="3"/>
+    <circle cx="47" cy="66" r="4" fill="${contorno}"/>
+    <circle cx="73" cy="66" r="4" fill="${contorno}"/>
+    <circle cx="48.5" cy="64" r="1.5" fill="#fff"/>
+    <circle cx="74.5" cy="64" r="1.5" fill="#fff"/>
+    <ellipse cx="36" cy="76" rx="5" ry="3" fill="#ff7b9c" opacity=".55"/>
+    <ellipse cx="84" cy="76" rx="5" ry="3" fill="#ff7b9c" opacity=".55"/>
+    <path d="M54 78 Q60 84 66 78" stroke="${contorno}" stroke-width="3" fill="none" stroke-linecap="round"/>
+  </svg>`;
+}
+
+/* ======================================================================
+   NAVEGAÇÃO
+   ====================================================================== */
+function mostrarTela(id) {
+  document.querySelectorAll('.tela').forEach(t => t.classList.remove('ativa'));
+  $('tela-' + id).classList.add('ativa');
+  window.scrollTo(0, 0);
+}
+
+function trocarAba(aba) {
+  if (estado.batalha && aba !== 'explorar') {
+    aviso('Termine a batalha primeiro!');
+    vibrar('erro');
+    return;
+  }
+  vibrar('leve');
+  document.querySelectorAll('.aba').forEach(b => b.classList.toggle('ativa', b.dataset.aba === aba));
+
+  if (aba === 'explorar') {
+    mostrarTela(estado.batalha ? 'batalha' : 'explorar');
+    renderTreinador();
+  } else if (aba === 'equipe') {
+    renderEquipe();
+    mostrarTela('equipe');
+  } else if (aba === 'box') {
+    renderBox();
+    mostrarTela('box');
+  }
+}
+
+/* ======================================================================
+   RENDERIZAÇÃO
+   ====================================================================== */
+function renderTreinador() {
+  const t = estado.treinador;
+  $('treinador-nome').textContent = t.nome;
+  $('treinador-avatar').textContent = t.nome.charAt(0).toUpperCase();
+  $('treinador-level').textContent = t.level;
+  $('treinador-dinheiro').textContent = t.dinheiro.toLocaleString('pt-BR');
+
+  const lider = estado.equipe[0];
+  $('lider-sprite').innerHTML = sprite(lider);
+  $('lider-nome').textContent = lider.nome;
+  $('lider-level').textContent = 'Lv ' + lider.level;
+  atualizarBarra('lider-hp-barra', 'lider-hp-num', lider);
+}
+
+function renderEquipe() {
+  const lista = $('lista-equipe');
+  lista.innerHTML = '';
+  estado.equipe.forEach((m, i) => {
+    const item = document.createElement('div');
+    item.className = 'card monstro-item';
+    item.innerHTML = `${sprite(m)}
+      <div class="info">
+        <span class="nome"></span>
+        ${htmlBarraHP(m)}
+      </div>
+      ${i === 0 ? '<span class="chip">⭐ Líder</span>' : '<button class="acao">Tornar líder</button>'}`;
+    item.querySelector('.nome').textContent = `${m.nome} · Lv ${m.level}`;
+    const btn = item.querySelector('.acao');
+    if (btn) btn.onclick = () => { tornarLider(i); };
+    lista.appendChild(item);
+  });
+}
+
+function renderBox() {
+  const grade = $('grade-box');
+  grade.innerHTML = '';
+  if (estado.box.length === 0) {
+    grade.style.display = 'block';
+    grade.innerHTML = '<div class="card vazio">📦<br>Sua Box está vazia.<br>Monstros capturados com a equipe cheia vêm para cá.</div>';
+    return;
+  }
+  grade.style.display = '';
+  estado.box.forEach(m => {
+    const item = document.createElement('div');
+    item.className = 'card box-item';
+    item.innerHTML = `${sprite(m)}<span class="nome"></span><span class="lv">Lv ${m.level}</span>`;
+    item.querySelector('.nome').textContent = m.nome;
+    grade.appendChild(item);
+  });
+}
+
+function tornarLider(i) {
+  const [m] = estado.equipe.splice(i, 1);
+  estado.equipe.unshift(m);
+  vibrar('sucesso');
+  aviso(`${m.nome} agora é o líder!`);
+  renderEquipe();
+}
+
+/* ======================================================================
+   EXPLORAÇÃO
+   ====================================================================== */
+let buscando = false;
+
+async function procurarMonstro(rota, botao) {
+  if (buscando) return;
+  const lider = estado.equipe[0];
+  if (lider.hp <= 0) {
+    aviso(`${lider.nome} está sem energia!`);
+    vibrar('erro');
+    return;
+  }
+  buscando = true;
+  vibrar('leve');
+  botao.classList.add('buscando');
+  await esperar(650);
+  botao.classList.remove('buscando');
+  buscando = false;
+
+  const dados = ROTAS[rota];
+  const inimigo = criarMonstro(escolher(dados.especies), aleatorio(dados.niveis[0], dados.niveis[1]));
+  iniciarBatalha(inimigo, dados.cor);
+}
+
+/* ======================================================================
+   BATALHA
+   ====================================================================== */
+function iniciarBatalha(inimigo, corArena) {
+  estado.batalha = { inimigo, travado: false };
+  vibrar('forte');
+
+  $('inimigo-nome').textContent = inimigo.nome;
+  $('inimigo-level').textContent = 'Lv ' + inimigo.level;
+  const tag = $('inimigo-tipo');
+  tag.textContent = TIPOS[inimigo.tipo].nome;
+  tag.style.background = TIPOS[inimigo.tipo].cor;
+  atualizarBarra('inimigo-hp-barra', 'inimigo-hp-num', inimigo);
+
+  const arena = $('arena');
+  arena.className = 'arena';
+  arena.style.setProperty('--cor-arena', corArena);
+  arena.innerHTML = sprite(inimigo);
+
+  $('log').innerHTML = '';
+  log(`Um ${inimigo.nome} selvagem apareceu!`);
+  log(`Vai, ${estado.equipe[0].nome}!`);
+
+  renderAtaques();
+  travarAcoes(false);
+  mostrarTela('batalha');
+}
+
+function renderAtaques() {
+  const lider = estado.equipe[0];
+  const grid = $('ataques');
+  grid.innerHTML = '';
+  lider.golpes.slice(0, 4).forEach((g, i) => {
+    const b = document.createElement('button');
+    b.className = 'ataque';
+    b.style.setProperty('--cor-tipo', TIPOS[g.tipo].cor);
+    b.innerHTML = `<span class="ataque-nome"></span><span class="ataque-info">${TIPOS[g.tipo].nome} · Poder ${g.poder}</span>`;
+    b.querySelector('.ataque-nome').textContent = g.nome;
+    b.onclick = () => usarAtaque(i);
+    grid.appendChild(b);
+  });
+}
+
+function log(texto) {
+  const p = document.createElement('p');
+  p.textContent = texto;
+  const caixa = $('log');
+  caixa.appendChild(p);
+  while (caixa.children.length > 6) caixa.removeChild(caixa.firstChild);
+  caixa.scrollTop = caixa.scrollHeight;
+}
+
+function travarAcoes(travar) {
+  if (estado.batalha) estado.batalha.travado = travar;
+  document.querySelectorAll('#ataques button, #btn-capturar, #btn-fugir').forEach(b => b.disabled = travar);
+}
+
+function calcularDano(atacante, defensor, golpe) {
+  let mult = 1;
+  if ((VANTAGENS[golpe.tipo] || []).includes(defensor.tipo)) mult = 2;
+  else if ((VANTAGENS[defensor.tipo] || []).includes(golpe.tipo)) mult = 0.5;
+  const base = golpe.poder * (0.6 + atacante.level / (defensor.level + 4));
+  const variacao = 0.85 + Math.random() * 0.15;
+  return { dano: Math.max(1, Math.round(base * mult * variacao)), mult };
+}
+
+async function usarAtaque(i) {
+  const b = estado.batalha;
+  if (!b || b.travado) return;
+  travarAcoes(true);
+  vibrar('leve');
+
+  const lider = estado.equipe[0];
+  const golpe = lider.golpes[i];
+
+  log(`${lider.nome} usou ${golpe.nome}!`);
+  await esperar(500);
+
+  if (Math.random() > (golpe.precisao || 1)) {
+    log('Mas errou!');
+  } else {
+    const { dano, mult } = calcularDano(lider, b.inimigo, golpe);
+    b.inimigo.hp = Math.max(0, b.inimigo.hp - dano);
+    animarDano();
+    atualizarBarra('inimigo-hp-barra', 'inimigo-hp-num', b.inimigo);
+    if (mult > 1) log('É super eficaz!');
+    if (mult < 1) log('Não foi muito eficaz...');
+  }
+  await esperar(600);
+
+  if (b.inimigo.hp <= 0) return vitoria();
+  await turnoInimigo();
+}
+
+async function turnoInimigo() {
+  const b = estado.batalha;
+  const lider = estado.equipe[0];
+  const golpe = escolher(b.inimigo.golpes);
+  log(`${b.inimigo.nome} usou ${golpe.nome}!`);
+  await esperar(500);
+
+  const { dano, mult } = calcularDano(b.inimigo, lider, golpe);
+  lider.hp = Math.max(0, lider.hp - dano);
+  vibrar('forte');
+  log(`${lider.nome} perdeu ${dano} de HP${mult > 1 ? ' (super eficaz!)' : ''}.`);
+  await esperar(500);
+
+  if (lider.hp <= 0) {
+    log(`${lider.nome} desmaiou!`);
+    vibrar('erro');
+    await esperar(1200);
+    lider.hp = Math.ceil(lider.hpMax / 2); // provisório: recupera metade da vida
+    aviso('Seu líder voltou para descansar.');
+    encerrarBatalha();
+    return;
+  }
+  travarAcoes(false);
+}
+
+function animarDano() {
+  const arena = $('arena');
+  arena.classList.remove('dano');
+  void arena.offsetWidth;
+  arena.classList.add('dano');
+}
+
+async function vitoria() {
+  const b = estado.batalha;
+  const premio = b.inimigo.level * 25;
+  const xp = b.inimigo.level * 10;
+  log(`${b.inimigo.nome} foi derrotado!`);
+  log(`Você ganhou 💰 ${premio} e ${xp} XP.`);
+  vibrar('sucesso');
+  estado.treinador.dinheiro += premio;
+  ganharXP(xp);
+  await esperar(1500);
+  encerrarBatalha();
+}
+
+function ganharXP(xp) {
+  const t = estado.treinador;
+  t.xp += xp;
+  const necessario = t.level * 50;
+  if (t.xp >= necessario) {
+    t.xp -= necessario;
+    t.level++;
+    aviso(`⭐ Você subiu para o Level ${t.level}!`);
+  }
+}
+
+async function tentarCaptura() {
+  const b = estado.batalha;
+  if (!b || b.travado) return;
+  travarAcoes(true);
+  vibrar('leve');
+
+  const arena = $('arena');
+  log('Você lançou a esfera de captura!');
+  arena.className = 'arena capturando';
+  await esperar(900);
+
+  const pctVida = b.inimigo.hp / b.inimigo.hpMax;
+  const chance = 0.25 + (1 - pctVida) * 0.6;
+
+  if (Math.random() < chance) {
+    const capturado = b.inimigo;
+    capturado.hp = capturado.hpMax;
+    let destino;
+    if (estado.equipe.length < 6) { estado.equipe.push(capturado); destino = 'para sua equipe'; }
+    else { estado.box.push(capturado); destino = 'para a Box'; }
+    log(`Pegou! ${capturado.nome} foi ${destino}.`);
+    vibrar('sucesso');
+    await esperar(1500);
+    encerrarBatalha();
+  } else {
+    arena.className = 'arena escapou';
+    log(`${b.inimigo.nome} escapou!`);
+    vibrar('erro');
+    await esperar(600);
+    await turnoInimigo();
+  }
+}
+
+function fugir() {
+  const b = estado.batalha;
+  if (!b || b.travado) return;
+  vibrar('leve');
+  aviso('Você fugiu em segurança!');
+  encerrarBatalha();
+}
+
+function encerrarBatalha() {
+  estado.batalha = null;
+  renderTreinador();
+  mostrarTela('explorar');
+}
+
+/* ======================================================================
+   INÍCIO
+   ====================================================================== */
+(function iniciar() {
+  const usuario = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+  if (usuario && usuario.first_name) estado.treinador.nome = usuario.first_name;
+
+  estado.equipe.push(criarMonstro('brasilho', 5));
+  renderTreinador();
+})();
+</script>
+</body>
+</html>
