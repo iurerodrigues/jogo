@@ -36,7 +36,7 @@ URL_JOGO = os.environ.get("URL_JOGO", "https://iurerodrigues.github.io/jogo/")
 BANCO = os.environ.get("BANCO", "/opt/bot/dados.db")
 PORTA = int(os.environ.get("PORTA", "8080"))
 ORIGENS = {"https://iurerodrigues.github.io"}
-VERSAO = "2.0"
+VERSAO = "2.1"
 
 # Precos em estrelas. Devem bater com PACOTES_VIP do jogo.
 PACOTES = {
@@ -51,6 +51,28 @@ PACOTES = {
 
 def log(*partes):
     print(time.strftime("%Y-%m-%d %H:%M:%S"), *partes, flush=True)
+
+
+# ----------------------------------------------------------------------------
+# Ajustes da maquina (1 GB de RAM): swap e sem atualizacoes automaticas pesadas
+# ----------------------------------------------------------------------------
+def ajustar_sistema():
+    import subprocess
+
+    def rodar(cmd):
+        try:
+            r = subprocess.run(cmd, shell=True, timeout=600, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            log("sistema:", cmd[:60], "->", r.returncode)
+        except Exception as e:
+            log("sistema falhou:", cmd[:60], e)
+
+    if os.geteuid() != 0:
+        return
+    rodar("systemctl disable --now dnf-makecache.timer dnf-automatic.timer dnf-automatic-install.timer packagekit.service 2>/dev/null; true")
+    if not os.path.exists("/swapfile"):
+        rodar("dd if=/dev/zero of=/swapfile bs=1M count=2048 && chmod 600 /swapfile && mkswap /swapfile")
+        rodar("grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab")
+    rodar("swapon /swapfile 2>/dev/null; sysctl -w vm.swappiness=60; true")
 
 
 # ----------------------------------------------------------------------------
@@ -376,6 +398,7 @@ def iniciar_api():
 if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Defina TELEGRAM_TOKEN")
+    threading.Thread(target=ajustar_sistema, daemon=True).start()
     preparar_banco()
     threading.Thread(target=iniciar_api, daemon=True).start()
     laco_bot()
