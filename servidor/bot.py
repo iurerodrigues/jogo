@@ -28,6 +28,7 @@ import threading
 import time
 import traceback
 import urllib.parse
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
@@ -41,7 +42,7 @@ URL_JOGO = os.environ.get("URL_JOGO", "https://iurerodrigues.github.io/jogo/")
 BANCO = os.environ.get("BANCO", "/opt/bot/dados.db")
 PORTA = int(os.environ.get("PORTA", "8080"))
 ORIGENS = {"https://iurerodrigues.github.io"}
-VERSAO = "2.6"
+VERSAO = "2.7"
 
 # Precos em estrelas. Devem bater com PACOTES_VIP do jogo.
 # Pacotes de Cristais (moeda VIP) vendidos em Telegram Stars
@@ -113,6 +114,8 @@ def banco():
 
 def preparar_banco():
     with _trava_banco, banco() as con:
+        con.execute("CREATE TABLE IF NOT EXISTS admins (uid INTEGER PRIMARY KEY, nome TEXT, desde REAL)")
+        con.execute("CREATE TABLE IF NOT EXISTS config_jogo (id INTEGER PRIMARY KEY CHECK (id = 1), valor TEXT, versao INTEGER, atualizado REAL, por INTEGER)")
         con.execute("""CREATE TABLE IF NOT EXISTS compras (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             uid INTEGER NOT NULL,
@@ -527,7 +530,9 @@ def nivel_tr(xp):
 
 
 def limite_nivel(nv):
-    return min(100, 8 + 4 * nv)
+    base = regra_jogo("comandoBase", 8, 1, 100)
+    passo = regra_jogo("comandoPorNivel", 4, 0.5, 50)
+    return min(100, int(base + passo * nv))
 
 
 def preparar_carteira(con):
@@ -599,6 +604,8 @@ def _ganhar(con, l, valor, repetivel=True):
     """Credita Moedas respeitando o teto diario dos ganhos repetiveis."""
     valor = max(0, int(valor))
     if repetivel:
+        # multiplicador de Moedas de batalha definido no painel ADM
+        valor = int(round(valor * regra_jogo("moedas", 1, 0.1, 5)))
         valor = min(valor, max(0, teto_diario(nivel_tr(l["xp"])) - l["ganho_dia"]))
         con.execute("UPDATE carteira SET moedas=moedas+?, ganho_dia=ganho_dia+? WHERE uid=?", (valor, valor, l["uid"]))
     else:
@@ -645,8 +652,9 @@ def moedas_acao(usuario, dados):
             var = _int(dados.get("var"), 0, 2)
             lend = bool(dados.get("lend")) and l["lend_dia"] < MAX_LENDARIOS_DIA
             mult_var = (1, 1.5, 2)[var]
-            xp = min(_int(dados.get("xp"), 0, 100000), nivel * 36)
+            xp = min(_int(dados.get("xp"), 0, 100000), nivel * 36 * regra_jogo("xpFera", 1, 0.1, 10))
             tipo = str(dados.get("tipo", ""))
+            xp = xp * regra_jogo("xpTreinador", 1, 0.1, 10)
             con.execute("UPDATE carteira SET xp=xp+?, ult_abate=? WHERE uid=?", (int(round(xp * 0.5)), agora, uid))
             if tipo == "selvagem":
                 ganho = _ganhar(con, l, round(nivel * 15 * mult_var * (5 if lend else 1)))
@@ -1062,7 +1070,7 @@ class Api(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             tamanho = int(self.headers.get("Content-Length", "0"))
-            if tamanho > (CONFIG_MAX + 8000 if self.path.startswith("/api/admin/config") else 20000):
+            if tamanho > (CONFIG_MAX + 8000 if self.path.startswith("/api/admin/config") or self.path.startswith("/api/admin/ia") else 20000):
                 return self._json(413, {"ok": False, "erro": "grande demais"})
             bruto = self.rfile.read(tamanho)
             if self.path.startswith("/api/pagamento/confirmar"):
@@ -1121,6 +1129,22 @@ class Api(BaseHTTPRequestHandler):
             if self.path.startswith("/api/admin/reivindicar"):
                 reivindicar_admin(usuario, corpo.get("codigo"))
                 return self._json(200, {"ok": True, "admin": True})
+            if self.path.startswith("/api/admin/ia/chave"):
+                try:
+                    salvar_chave_ia(uid, corpo.get("chave"), corpo.get("modelo"))
+                except PermissionError:
+                    return self._json(403, {"ok": False, "erro": "so administrador"})
+                return self._json(200, {"ok": True, "ia": info_ia()})
+            if self.path.startswith("/api/admin/ia/info"):
+                if not eh_admin(uid):
+                    return self._json(403, {"ok": False, "erro": "so administrador"})
+                return self._json(200, {"ok": True, "ia": info_ia()})
+            if self.path.startswith("/api/admin/ia"):
+                try:
+                    r = assistente_ia(uid, corpo.get("pedido"), corpo.get("contexto") or {})
+                except PermissionError:
+                    return self._json(403, {"ok": False, "erro": "so administrador"})
+                return self._json(200, {"ok": True, "resposta": r})
             if self.path.startswith("/api/admin/config"):
                 try:
                     versao = gravar_config(uid, corpo.get("config"))
@@ -1199,8 +1223,130 @@ def gravar_config(uid, cfg):
         versao = (l["versao"] if l else 0) + 1
         con.execute("INSERT OR REPLACE INTO config_jogo (id, valor, versao, atualizado, por) VALUES (1, ?, ?, ?, ?)",
                     (texto, versao, time.time(), uid))
+    _cache_cfg["t"] = 0
     log("config do jogo atualizada", versao, "por", uid)
     return versao
+
+
+
+_cache_cfg = {"t": 0, "cfg": {}}
+
+
+def regra_jogo(nome, padrao, minimo, maximo):
+    """Le uma regra do painel ADM (com cache de 30 s) dentro de limites seguros."""
+    agora = time.time()
+    if agora - _cache_cfg["t"] > 30:
+        try:
+            # sem pegar a trava: esta funcao e chamada de dentro de operacoes que ja estao com ela
+            con = sqlite3.connect(BANCO, timeout=2)
+            con.row_factory = sqlite3.Row
+            try:
+                # so leitura (sem CREATE): nao disputa a escrita com a operacao em andamento
+                l = con.execute("SELECT valor FROM config_jogo WHERE id=1").fetchone()
+                _cache_cfg["cfg"] = json.loads(l["valor"]) if l else {}
+            finally:
+                con.close()
+        except Exception:
+            _cache_cfg["cfg"] = {}
+        _cache_cfg["t"] = agora
+    try:
+        v = float((_cache_cfg["cfg"].get("regras") or {}).get(nome, padrao))
+    except (TypeError, ValueError):
+        v = padrao
+    return max(minimo, min(maximo, v))
+
+
+# ----------------------------------------------------------------------------
+# Assistente do painel ADM: o dono escreve o pedido em portugues e uma IA
+# devolve as mudancas no formato do painel (so dados de balanceamento, nunca codigo).
+# A chave da IA (Gemini gratis ou Anthropic) fica so no servidor.
+# ----------------------------------------------------------------------------
+INSTRUCOES_IA = """Voce e o assistente do painel de administrador do jogo Domadores de Feras (RPG de monstros).
+O dono do jogo NAO e programador. Ele escreve um pedido em portugues e voce devolve SO um JSON com as mudancas.
+Voce so pode mexer nos dados descritos no ESQUEMA. Use apenas ids que existem no CATALOGO.
+Responda exatamente neste formato JSON:
+{"explicacao": "frase curta em portugues dizendo o que voce mudou e por que", "mudancas": {"especies": {}, "golpes": {}, "rotas": {}, "ginasios": {}, "regras": {}}, "duvida": ""}
+- Coloque em "mudancas" so o que muda (os valores novos completos de cada item alterado).
+- Se o pedido for ambiguo, impossivel ou fora do esquema, deixe "mudancas" vazio e explique em "duvida".
+- Nunca invente ids. Nunca mude nada que nao foi pedido.
+"""
+
+
+def _segredo(con, chave, valor=None):
+    con.execute("CREATE TABLE IF NOT EXISTS segredos (k TEXT PRIMARY KEY, v TEXT)")
+    if valor is not None:
+        con.execute("INSERT OR REPLACE INTO segredos (k, v) VALUES (?, ?)", (chave, valor))
+        return valor
+    l = con.execute("SELECT v FROM segredos WHERE k=?", (chave,)).fetchone()
+    return l["v"] if l else ""
+
+
+def salvar_chave_ia(uid, chave, modelo):
+    chave = str(chave or "").strip()
+    with _trava_banco, banco() as con:
+        _tabelas_adm(con)
+        if con.execute("SELECT 1 FROM admins WHERE uid=?", (uid,)).fetchone() is None:
+            raise PermissionError("so administrador")
+        if chave:
+            if len(chave) < 20 or len(chave) > 300:
+                raise ValueError("chave invalida")
+            _segredo(con, "ia_chave", chave)
+        if modelo is not None:
+            _segredo(con, "ia_modelo", str(modelo).strip()[:80])
+    return True
+
+
+def info_ia():
+    with _trava_banco, banco() as con:
+        c = _segredo(con, "ia_chave")
+        m = _segredo(con, "ia_modelo")
+    prov = "anthropic" if c.startswith("sk-ant") else ("gemini" if c else "")
+    return {"configurada": bool(c), "provedor": prov, "modelo": m or ("claude-haiku-5-5" if prov == "anthropic" else "gemini-2.5-flash")}
+
+
+def _post_json(url, corpo, cabecalhos, limite=90):
+    req = urllib.request.Request(url, data=json.dumps(corpo).encode("utf-8"), headers=dict({"Content-Type": "application/json"}, **cabecalhos))
+    try:
+        with urllib.request.urlopen(req, timeout=limite) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detalhe = e.read().decode("utf-8", "replace")[:300]
+        log("erro ia", e.code, detalhe)
+        raise ValueError("a IA recusou (%d): %s" % (e.code, detalhe[:160]))
+
+
+def assistente_ia(uid, pedido, contexto):
+    if not eh_admin(uid):
+        raise PermissionError("so administrador")
+    pedido = str(pedido or "").strip()[:2000]
+    if not pedido:
+        raise ValueError("pedido vazio")
+    with _trava_banco, banco() as con:
+        chave = _segredo(con, "ia_chave")
+        modelo = _segredo(con, "ia_modelo")
+    if not chave:
+        raise ValueError("sem chave de IA")
+    texto = "ESQUEMA E CATALOGO:\n" + json.dumps(contexto, ensure_ascii=False)[:90000] + "\n\nPEDIDO DO DONO DO JOGO:\n" + pedido
+    if chave.startswith("sk-ant"):
+        r = _post_json("https://api.anthropic.com/v1/messages",
+                       {"model": modelo or "claude-haiku-5-5", "max_tokens": 4000, "system": INSTRUCOES_IA,
+                        "messages": [{"role": "user", "content": texto}]},
+                       {"x-api-key": chave, "anthropic-version": "2023-06-01"})
+        saida = "".join(p.get("text", "") for p in r.get("content", []))
+    else:
+        r = _post_json("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s" % (urllib.parse.quote(modelo or "gemini-2.5-flash"), urllib.parse.quote(chave)),
+                       {"systemInstruction": {"parts": [{"text": INSTRUCOES_IA}]},
+                        "contents": [{"role": "user", "parts": [{"text": texto}]}],
+                        "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2}}, {})
+        saida = "".join(p.get("text", "") for c in r.get("candidates", []) for p in (c.get("content") or {}).get("parts", []))
+    ini, fim = saida.find("{"), saida.rfind("}")
+    if ini < 0 or fim < 0:
+        raise ValueError("a IA nao devolveu mudancas")
+    try:
+        resposta = json.loads(saida[ini:fim + 1])
+    except ValueError:
+        raise ValueError("a IA devolveu um formato estranho, tente reescrever o pedido")
+    return resposta
 
 
 def iniciar_api():
