@@ -5,9 +5,12 @@ Domadores de Feras - servidor do bot do Telegram.
 
 Usa apenas a biblioteca padrao do Python (3.6+), sem dependencias.
 - Bot: /start, /jogar, /ajuda, /ranking e o botao que abre o jogo.
-- Pagamentos VIP em Telegram Stars (moeda XTR).
+- Moedas do jogo com saldo no servidor (anti-trapaca): POST /api/moedas
+- Cristais (VIP) comprados por pagamento externo (Pix/cartao):
+    POST /api/pedido -> cria o pedido e devolve o link externo
+    GET  /pagar?pedido=... -> pagina de pagamento provisoria
+    POST /api/pagamento/confirmar -> webhook assinado (HMAC) que credita
 - API HTTP (atras do Caddy com HTTPS) para o jogo:
-    POST /api/fatura     -> cria o link de pagamento de um pacote
     POST /api/resgatar   -> entrega as compras pagas ainda nao entregues
     POST /api/ranking    -> envia o progresso do jogador
     GET  /api/ranking    -> top 50
@@ -18,6 +21,7 @@ import hashlib
 import hmac
 import json
 import os
+import random
 import re
 import sqlite3
 import threading
@@ -37,7 +41,7 @@ URL_JOGO = os.environ.get("URL_JOGO", "https://iurerodrigues.github.io/jogo/")
 BANCO = os.environ.get("BANCO", "/opt/bot/dados.db")
 PORTA = int(os.environ.get("PORTA", "8080"))
 ORIGENS = {"https://iurerodrigues.github.io"}
-VERSAO = "2.4"
+VERSAO = "2.5"
 
 # Precos em estrelas. Devem bater com PACOTES_VIP do jogo.
 # Pacotes de Cristais (moeda VIP) vendidos em Telegram Stars
@@ -56,6 +60,11 @@ CATALOGO = {
     "auraDourada": 120, "auraSombria": 120, "auraGelida": 120, "auraFlamejante": 120,
 }
 
+
+# Tabelas do jogo (geradas pelo build a partir de 1_dados.js - nao editar a mao)
+# <<TABELAS_JOGO>>
+TABELAS = json.loads(r'''{"itens":{"esfera":50,"superEsfera":200,"ultraEsfera":600,"pocao":60,"superPocao":180,"antidoto":120,"pedraIgnea":3000,"pedraAbissal":3000,"pedraTrovao":3000,"pedraVerdejante":3000,"pedraLunar":3500,"pedraEterna":2000,"garraAfiada":2500,"escamaDura":2500,"penaVeloz":2500,"amuletoVital":2500,"frutaVital":400,"folhaRegen":4000,"talismaXP":5000,"compartilhadorXP":15000,"lenteFoco":3500,"faixaElemental":4500,"tonicoVital":1000,"tonicoForca":1000,"tonicoGuarda":1000,"tonicoAgil":1000,"ervaReset":1500,"mentaNatureza":6000,"cristalPerfeito":15000,"doceRaro":1200,"incenso":1500},"roupas":{"jaqueta":{"preco":2000,"requer":null},"lenco":{"preco":2500,"requer":null},"chapeu":{"preco":3000,"requer":null},"capa":{"preco":4500,"requer":null},"capuz":{"preco":6000,"requer":null},"armadura":{"preco":9000,"requer":null},"campeao":{"preco":20000,"requer":"campeao"}},"ginasios":[{"premio":800,"qtd":3},{"premio":1200,"qtd":3},{"premio":1700,"qtd":3},{"premio":2200,"qtd":3},{"premio":2800,"qtd":3},{"premio":3500,"qtd":3},{"premio":4200,"qtd":3},{"premio":5000,"qtd":3}],"liga":[{"premio":6000,"qtd":4},{"premio":7000,"qtd":4},{"premio":8000,"qtd":4},{"premio":15000,"qtd":5}],"missoes":{"vitorias":{"alvos":[5,8,12],"por":120,"longo":false},"capturas":{"alvos":[2,3,5],"por":200,"longo":false},"treinadores":{"alvos":[1,2,3],"por":300,"longo":false},"exploracoes":{"alvos":[10,15,25],"por":40,"longo":false},"criticos":{"alvos":[2,4],"por":250,"longo":false},"superEficaz":{"alvos":[5,10],"por":80,"longo":false},"torreAndares":{"alvos":[3,5],"por":200,"longo":false},"evolucoes":{"alvos":[1,2],"por":600,"longo":true},"ovos":{"alvos":[1,2],"por":500,"longo":true}},"periodos":{"dia":{"qtd":3,"mult":1},"semana":{"qtd":4,"mult":6},"mes":{"qtd":5,"mult":22}},"conquistas":{"cap10":{"premio":1000,"cont":"capturas","alvo":10},"cap50":{"premio":5000,"cont":"capturas","alvo":50},"cap150":{"premio":20000,"cont":"capturas","alvo":150},"vit25":{"premio":1500,"cont":"vitorias","alvo":25},"vit100":{"premio":6000,"cont":"vitorias","alvo":100},"vit500":{"premio":30000,"cont":"vitorias","alvo":500},"raro1":{"premio":3000,"cont":"raros","alvo":1},"raro10":{"premio":15000,"cont":"raros","alvo":10},"ovo1":{"premio":1000,"cont":"ovos","alvo":1},"ovo20":{"premio":10000,"cont":"ovos","alvo":20},"evo5":{"premio":2000,"cont":"evolucoes","alvo":5},"ins8":{"premio":10000,"cont":"insignias","alvo":8},"camp":{"premio":20000,"cont":"campeao","alvo":1},"torre10":{"premio":5000,"cont":"torreRecorde","alvo":10},"torre30":{"premio":25000,"cont":"torreRecorde","alvo":30},"arena5":{"premio":5000,"cont":"arena","alvo":5},"dex30":{"premio":8000,"cont":"bestiario","alvo":30},"dexAll":{"premio":100000,"cont":"bestiario","alvo":86}}}''')
+# <</TABELAS_JOGO>>
 
 # Trocas entre jogadores
 ESPECIES_TROCAVEIS = set(["cinzor", "brasador", "infernor", "verdrax", "espinhador", "silvagor", "hidrax", "maregor", "leviator", "rasgor", "dentrax", "corvax", "gralhador", "falcorei", "lobrax", "lobrasa", "lobomar", "lobovolt", "lobosilva", "lobumbra", "vinhax", "constritor", "esporax", "micotar", "piranox", "tubarax", "krakel", "krakengor", "voltrix", "voltragon", "amperon", "tesloran", "gigavolt", "magmor", "caldeirax", "granor", "basaltor", "montanhor", "cascor", "cascalhao", "peconhar", "viperax", "basiliscor", "lodrax", "pestilar", "umbrax", "noctifer", "sombral", "eclipsor", "fagulhor", "pirotitan", "toupax", "escavor", "estalix", "trovoave", "ostrax", "perlador", "sapux", "coaxor", "morcelix", "vampirax", "lagartix", "salamandror", "geadax", "nevrak", "glaciaur", "criostal", "criogor", "brisax", "ventorax", "furacor", "zefiron", "ciclonar", "punhor", "golpeador", "brutamor", "gingar", "mestrax"])
@@ -143,6 +152,8 @@ def preparar_banco():
         con.execute("""CREATE TABLE IF NOT EXISTS saldo (
             uid INTEGER PRIMARY KEY,
             cristais INTEGER NOT NULL DEFAULT 0)""")
+        preparar_carteira(con)
+        preparar_pedidos(con)
 
 
 # ----------------------------------------------------------------------------
@@ -407,13 +418,21 @@ def troca_aceitar(usuario, dados):
             if cur.rowcount != 1:
                 raise ValueError("cristais insuficientes")
             creditar(con, l["de_uid"], int(preco * (1 - TAXA_TROCA)))
-        # moedas: o jogo de quem compra desconta; o vendedor recebe ao resgatar
+        elif l["pede_tipo"] == "moedas":
+            preco = l["pede_valor"]
+            carteira(con, uid)
+            carteira(con, l["de_uid"])
+            cur = con.execute("UPDATE carteira SET moedas = moedas - ? WHERE uid=? AND moedas >= ?", (preco, uid, preco))
+            if cur.rowcount != 1:
+                raise ValueError("moedas insuficientes")
+            con.execute("UPDATE carteira SET moedas = moedas + ? WHERE uid=?", (int(preco * (1 - TAXA_TROCA)), l["de_uid"]))
         cur = con.execute("UPDATE trocas SET status='concluida', para_uid=?, para_nome=?, contra_fera=?, fechado=? WHERE codigo=? AND status='aberta'",
                           (uid, nome_de(usuario, dados), contra, int(time.time()), codigo))
         if cur.rowcount != 1:
             raise ValueError("oferta encerrada")
+        cart = con.execute("SELECT moedas FROM carteira WHERE uid=?", (uid,)).fetchone()
         return {"fera": json.loads(l["fera"]), "pedeTipo": l["pede_tipo"], "pedeValor": l["pede_valor"],
-                "cristais": ver_saldo_con(con, uid)}
+                "cristais": ver_saldo_con(con, uid), "moedas": cart["moedas"] if cart else None}
 
 
 def ver_saldo_con(con, uid):
@@ -422,18 +441,16 @@ def ver_saldo_con(con, uid):
 
 
 def bonus_cristais(uid):
-    """Todo mundo ganha Cristais grátis uma vez por dia: 1 por dia, 5 no 7º dia seguido."""
-    hoje = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 3 * 3600))
-    ontem = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 27 * 3600))
+    """Todo mundo ganha 1 Cristal grátis por semana (segunda a domingo)."""
+    semana = semana_br()
     with _trava_banco, banco() as con:
         l = con.execute("SELECT ultimo, sequencia FROM bonus_diario WHERE uid=?", (uid,)).fetchone()
-        if l and l["ultimo"] == hoje:
+        if l and l["ultimo"] == semana:
             return 0, l["sequencia"], ver_saldo_con(con, uid)
-        seq = (l["sequencia"] + 1) if l and l["ultimo"] == ontem else 1
-        ganho = 5 if seq % 7 == 0 else 1
-        con.execute("INSERT INTO bonus_diario (uid, ultimo, sequencia) VALUES (?,?,?) ON CONFLICT(uid) DO UPDATE SET ultimo=excluded.ultimo, sequencia=excluded.sequencia", (uid, hoje, seq))
-        creditar(con, uid, ganho)
-        return ganho, seq, ver_saldo_con(con, uid)
+        seq = (l["sequencia"] + 1) if l else 1
+        con.execute("INSERT INTO bonus_diario (uid, ultimo, sequencia) VALUES (?,?,?) ON CONFLICT(uid) DO UPDATE SET ultimo=excluded.ultimo, sequencia=excluded.sequencia", (uid, semana, seq))
+        creditar(con, uid, 1)
+        return 1, seq, ver_saldo_con(con, uid)
 
 
 def troca_cancelar(uid, codigo):
@@ -456,7 +473,7 @@ def troca_minhas(uid):
                 if l["pede_tipo"] == "fera":
                     entregas.append({"tipo": "fera", "fera": json.loads(l["contra_fera"]), "codigo": l["codigo"], "de": l["para_nome"]})
                 elif l["pede_tipo"] == "moedas":
-                    entregas.append({"tipo": "moedas", "valor": int(l["pede_valor"] * (1 - TAXA_TROCA)), "codigo": l["codigo"], "de": l["para_nome"]})
+                    entregas.append({"tipo": "moedas", "valor": int(l["pede_valor"] * (1 - TAXA_TROCA)), "codigo": l["codigo"], "de": l["para_nome"], "creditado": True})
                 else:
                     entregas.append({"tipo": "cristais", "valor": int(l["pede_valor"] * (1 - TAXA_TROCA)), "codigo": l["codigo"], "de": l["para_nome"]})
             else:
@@ -468,6 +485,443 @@ def troca_minhas(uid):
         saldo = ver_saldo_con(con, uid)
     return {"entregas": entregas, "abertas": [troca_publica(l) for l in abertas],
             "historico": [troca_publica(l) for l in historico], "cristais": saldo}
+
+
+# ----------------------------------------------------------------------------
+# Carteira de Moedas (autoritativa): o saldo de Moedas e o XP do treinador
+# vivem no servidor. O jogo so informa o que aconteceu; o servidor decide
+# quanto vale, com limites de nivel, tempo e teto diario. Editar o numero no
+# celular nao muda nada: na proxima sincronizacao o valor do servidor vence.
+# ----------------------------------------------------------------------------
+XP_TREINADOR = 110
+MIGRACAO_MAX_MOEDAS = 10000          # quem ja jogava traz no maximo isso
+MIGRACAO_MAX_XP = XP_TREINADOR * 16  # e no maximo o XP do Level 5
+INTERVALO_ABATE = 2.5                # segundos minimos entre duas feras derrotadas
+MAX_LENDARIOS_DIA = 3
+MAX_LIBERTAR_DIA = 30
+MAX_ARENA_DIA = 15
+MARCOS_NIVEL = list(range(10, 101, 10))  # Level 10, 20, ... 100 -> 1 Cristal cada
+
+
+def dia_br(desloc=0):
+    return time.strftime("%Y-%m-%d", time.gmtime(time.time() - 3 * 3600 + desloc * 86400))
+
+
+def semana_br():
+    t = time.gmtime(time.time() - 3 * 3600)
+    seg = time.time() - 3 * 3600 - t.tm_wday * 86400
+    return "S" + time.strftime("%Y-%m-%d", time.gmtime(seg))
+
+
+def chave_periodo_srv(periodo):
+    if periodo == "mes":
+        return time.strftime("%Y-%m", time.gmtime(time.time() - 3 * 3600))
+    if periodo == "semana":
+        return semana_br()
+    return dia_br()
+
+
+def nivel_tr(xp):
+    return min(100, int((max(0, xp) / XP_TREINADOR) ** 0.5) + 1)
+
+
+def limite_nivel(nv):
+    return min(100, 8 + 4 * nv)
+
+
+def preparar_carteira(con):
+    con.execute("""CREATE TABLE IF NOT EXISTS carteira (
+        uid INTEGER PRIMARY KEY,
+        moedas INTEGER NOT NULL DEFAULT 500,
+        xp INTEGER NOT NULL DEFAULT 0,
+        vitorias INTEGER NOT NULL DEFAULT 0,
+        pend INTEGER NOT NULL DEFAULT 0,
+        ult_abate REAL NOT NULL DEFAULT 0,
+        dia TEXT NOT NULL DEFAULT '',
+        ganho_dia INTEGER NOT NULL DEFAULT 0,
+        lend_dia INTEGER NOT NULL DEFAULT 0,
+        libertar_dia INTEGER NOT NULL DEFAULT 0,
+        arena_dia INTEGER NOT NULL DEFAULT 0,
+        arena_vit INTEGER NOT NULL DEFAULT 0,
+        torre INTEGER NOT NULL DEFAULT 0,
+        torre_rec INTEGER NOT NULL DEFAULT 0,
+        diario_ult TEXT NOT NULL DEFAULT '',
+        diario_seq INTEGER NOT NULL DEFAULT 0,
+        criado INTEGER NOT NULL)""")
+    con.execute("""CREATE TABLE IF NOT EXISTS chaves (
+        uid INTEGER NOT NULL,
+        chave TEXT NOT NULL,
+        criado INTEGER NOT NULL,
+        PRIMARY KEY (uid, chave))""")
+
+
+def carteira(con, uid, local=None):
+    l = con.execute("SELECT * FROM carteira WHERE uid=?", (uid,)).fetchone()
+    if l:
+        if l["dia"] != dia_br():
+            con.execute("UPDATE carteira SET dia=?, ganho_dia=0, lend_dia=0, libertar_dia=0, arena_dia=0 WHERE uid=?", (dia_br(), uid))
+            l = con.execute("SELECT * FROM carteira WHERE uid=?", (uid,)).fetchone()
+        return l
+    local = local or {}
+    moedas = _int(local.get("d", 500), 0, MIGRACAO_MAX_MOEDAS)
+    xp = _int(local.get("x", 0), 0, MIGRACAO_MAX_XP)
+    con.execute("INSERT INTO carteira (uid, moedas, xp, dia, criado) VALUES (?,?,?,?,?)",
+                (uid, moedas, xp, dia_br(), int(time.time())))
+    return con.execute("SELECT * FROM carteira WHERE uid=?", (uid,)).fetchone()
+
+
+def tem_chave(con, uid, chave):
+    return con.execute("SELECT 1 FROM chaves WHERE uid=? AND chave=?", (uid, chave)).fetchone() is not None
+
+
+def marcar_chave(con, uid, chave):
+    try:
+        con.execute("INSERT INTO chaves (uid, chave, criado) VALUES (?,?,?)", (uid, chave, int(time.time())))
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+
+def vip_ativo(con, uid):
+    """O Passe VIP comprado com Cristais vale 30 dias (somando compras)."""
+    ate = 0
+    for l in con.execute("SELECT criado FROM compras WHERE uid=? AND pacote='passe' ORDER BY criado", (uid,)):
+        ate = max(ate, l["criado"]) + 30 * 86400
+    return ate > time.time()
+
+
+def teto_diario(nv):
+    return 20000 + 2000 * nv
+
+
+def _ganhar(con, l, valor, repetivel=True):
+    """Credita Moedas respeitando o teto diario dos ganhos repetiveis."""
+    valor = max(0, int(valor))
+    if repetivel:
+        valor = min(valor, max(0, teto_diario(nivel_tr(l["xp"])) - l["ganho_dia"]))
+        con.execute("UPDATE carteira SET moedas=moedas+?, ganho_dia=ganho_dia+? WHERE uid=?", (valor, valor, l["uid"]))
+    else:
+        con.execute("UPDATE carteira SET moedas=moedas+? WHERE uid=?", (valor, l["uid"]))
+    return valor
+
+
+def _marcos(con, uid, xp_antes, xp_depois, cristais_ganhos):
+    """Cristais grátis por marco de Level, verificado pelo XP que o servidor contou."""
+    na, nd = nivel_tr(xp_antes), nivel_tr(xp_depois)
+    for m in MARCOS_NIVEL:
+        if na < m <= nd and marcar_chave(con, uid, "nv%d" % m):
+            creditar(con, uid, 1)
+            cristais_ganhos.append({"motivo": "Level %d" % m, "qtd": 1})
+
+
+def _niveis(lista, teto, maximo=6):
+    if not isinstance(lista, list) or not 1 <= len(lista) <= maximo:
+        raise ValueError("time invalido")
+    return [_int(n, 1, teto) for n in lista]
+
+
+def moedas_acao(usuario, dados):
+    uid = usuario["id"]
+    acao = str(dados.get("acao", ""))
+    ganho = 0
+    cristais_ganhos = []
+    aviso = None
+    with _trava_banco, banco() as con:
+        l = carteira(con, uid, dados.get("local") if acao == "sync" else None)
+        nv = nivel_tr(l["xp"])
+        teto = min(100, limite_nivel(nv) + 6)
+        xp_antes = l["xp"]
+
+        if acao == "sync":
+            pass
+
+        elif acao == "abate":
+            # uma fera inimiga derrotada: XP do treinador (+ Moedas se for selvagem)
+            agora = time.time()
+            if agora - l["ult_abate"] < INTERVALO_ABATE:
+                raise ValueError("rapido demais")
+            nivel = _int(dados.get("nivel"), 1, teto)
+            var = _int(dados.get("var"), 0, 2)
+            lend = bool(dados.get("lend")) and l["lend_dia"] < MAX_LENDARIOS_DIA
+            mult_var = (1, 1.5, 2)[var]
+            xp = min(_int(dados.get("xp"), 0, 100000), nivel * 36)
+            tipo = str(dados.get("tipo", ""))
+            con.execute("UPDATE carteira SET xp=xp+?, ult_abate=? WHERE uid=?", (int(round(xp * 0.5)), agora, uid))
+            if tipo == "selvagem":
+                ganho = _ganhar(con, l, round(nivel * 15 * mult_var * (5 if lend else 1)))
+                con.execute("UPDATE carteira SET vitorias=vitorias+1, lend_dia=lend_dia+? WHERE uid=?", (1 if lend else 0, uid))
+            else:
+                con.execute("UPDATE carteira SET pend=pend+1 WHERE uid=?", (uid,))
+
+        elif acao == "premio":
+            tipo = str(dados.get("tipo", ""))
+            revanche = bool(dados.get("revanche"))
+            pend = l["pend"]
+            if tipo in ("treinador", "rival"):
+                niveis = _niveis(dados.get("niveis"), teto)
+                if pend < len(niveis):
+                    raise ValueError("batalha nao confere")
+                pedido = _int(dados.get("premio"), 0, 10 ** 7)
+                ganho = _ganhar(con, l, min(pedido, max(sum(niveis) * 22, max(niveis) * 60)))
+                con.execute("UPDATE carteira SET vitorias=vitorias+1 WHERE uid=?", (uid,))
+            elif tipo in ("ginasio", "liga"):
+                tabela = TABELAS["ginasios"] if tipo == "ginasio" else TABELAS["liga"]
+                ref = _int(dados.get("ref"), 0, len(tabela) - 1)
+                cfg = tabela[ref]
+                if pend < cfg["qtd"]:
+                    raise ValueError("batalha nao confere")
+                letra = "g" if tipo == "ginasio" else "l"
+                if not revanche and marcar_chave(con, uid, "%s%d" % (letra, ref)):
+                    ganho = _ganhar(con, l, cfg["premio"], repetivel=False)
+                    if tipo == "ginasio" and con.execute("SELECT COUNT(*) FROM chaves WHERE uid=? AND chave GLOB 'g[0-9]*'", (uid,)).fetchone()[0] >= len(TABELAS["ginasios"]) and marcar_chave(con, uid, "ins_todas"):
+                        creditar(con, uid, 1)
+                        cristais_ganhos.append({"motivo": "Todas as insígnias", "qtd": 1})
+                    if tipo == "liga" and ref == len(tabela) - 1 and marcar_chave(con, uid, "campeao"):
+                        creditar(con, uid, 2)
+                        cristais_ganhos.append({"motivo": "Campeão da Liga", "qtd": 2})
+                elif marcar_chave(con, uid, "r%s%d:%s" % (letra, ref, dia_br())):
+                    ganho = _ganhar(con, l, round(cfg["premio"] / 3))
+                else:
+                    aviso = "Revanche já premiada hoje."
+                con.execute("UPDATE carteira SET vitorias=vitorias+1 WHERE uid=?", (uid,))
+            elif tipo == "torre":
+                andar = _int(dados.get("andar"), 1, 1000)
+                if andar != 1 and andar != l["torre"] + 1:
+                    raise ValueError("andar nao confere")
+                if pend < (2 if andar < 5 else 3):
+                    raise ValueError("batalha nao confere")
+                ganho = _ganhar(con, l, 150 + andar * 60)
+                con.execute("UPDATE carteira SET torre=?, torre_rec=MAX(torre_rec, ?) WHERE uid=?", (andar, andar, uid))
+            elif tipo == "arena":
+                niveis = _niveis(dados.get("niveis"), teto)
+                if pend < len(niveis):
+                    raise ValueError("batalha nao confere")
+                if l["arena_dia"] >= MAX_ARENA_DIA:
+                    aviso = "Limite diário de prêmios da Arena atingido."
+                else:
+                    pedido = _int(dados.get("premio"), 0, 10 ** 7)
+                    ganho = _ganhar(con, l, min(pedido, 400 + sum(niveis) * 10))
+                    con.execute("UPDATE carteira SET arena_dia=arena_dia+1, arena_vit=arena_vit+1 WHERE uid=?", (uid,))
+            else:
+                raise ValueError("premio invalido")
+            con.execute("UPDATE carteira SET pend=0 WHERE uid=?", (uid,))
+
+        elif acao == "missao":
+            periodo = str(dados.get("periodo", "dia"))
+            p = TABELAS["periodos"].get(periodo)
+            md = TABELAS["missoes"].get(str(dados.get("modelo", "")))
+            if not p or not md or (periodo == "dia" and md["longo"]):
+                raise ValueError("missao invalida")
+            alvo = _int(dados.get("alvo"), 1, 100000)
+            validos = set(max(1, int(round(a * p["mult"]))) for a in md["alvos"])
+            if alvo not in validos:
+                raise ValueError("missao invalida")
+            chave = chave_periodo_srv(periodo)
+            ja = con.execute("SELECT COUNT(*) FROM chaves WHERE uid=? AND chave LIKE ?", (uid, "m:%s:%s:%%" % (periodo, chave))).fetchone()[0]
+            if ja >= p["qtd"] or not marcar_chave(con, uid, "m:%s:%s:%s" % (periodo, chave, dados.get("modelo"))):
+                raise ValueError("missao ja resgatada")
+            ganho = _ganhar(con, l, md["por"] * alvo, repetivel=False)
+
+        elif acao == "conquista":
+            cid = str(dados.get("id", ""))
+            c = TABELAS["conquistas"].get(cid)
+            if not c:
+                raise ValueError("conquista invalida")
+            ok = True
+            if c["cont"] == "vitorias":
+                ok = l["vitorias"] >= c["alvo"]
+            elif c["cont"] == "insignias":
+                ok = con.execute("SELECT COUNT(*) FROM chaves WHERE uid=? AND chave GLOB 'g[0-9]*'", (uid,)).fetchone()[0] >= c["alvo"]
+            elif c["cont"] == "campeao":
+                ok = tem_chave(con, uid, "campeao")
+            elif c["cont"] == "torreRecorde":
+                ok = l["torre_rec"] >= c["alvo"]
+            elif c["cont"] == "arena":
+                ok = l["arena_vit"] >= c["alvo"]
+            if not ok:
+                raise ValueError("conquista ainda nao confere no servidor")
+            if not marcar_chave(con, uid, "c:" + cid):
+                raise ValueError("conquista ja resgatada")
+            ganho = _ganhar(con, l, c["premio"], repetivel=False)
+
+        elif acao == "diario":
+            if l["diario_ult"] == dia_br():
+                aviso = "Recompensa de hoje já resgatada."
+            else:
+                seq = l["diario_seq"] + 1 if l["diario_ult"] == dia_br(-1) else 1
+                dia = (seq - 1) % 7 + 1
+                mult = 2 if vip_ativo(con, uid) else 1
+                con.execute("UPDATE carteira SET diario_ult=?, diario_seq=? WHERE uid=?", (dia_br(), seq, uid))
+                ganho = _ganhar(con, l, (150 + dia * 100) * mult, repetivel=False)
+
+        elif acao == "libertar":
+            if l["libertar_dia"] >= MAX_LIBERTAR_DIA:
+                aviso = "Limite diário de recompensas por libertar atingido."
+            else:
+                nivel = _int(dados.get("nivel"), 1, teto)
+                var = _int(dados.get("var"), 0, 1)
+                ganho = _ganhar(con, l, nivel * 5 * (3 if var else 1))
+                con.execute("UPDATE carteira SET libertar_dia=libertar_dia+1 WHERE uid=?", (uid,))
+
+        elif acao == "derrota":
+            tipo = str(dados.get("tipo", ""))
+            con.execute("UPDATE carteira SET pend=0 WHERE uid=?", (uid,))
+            if tipo not in ("torre", "arena"):
+                perda = l["moedas"] // 10
+                piso = XP_TREINADOR * (nv - 1) ** 2
+                faixa = XP_TREINADOR * nv ** 2 - piso
+                perda_xp = max(0, min(l["xp"] - piso, int(round(faixa * 0.15))))
+                con.execute("UPDATE carteira SET moedas=moedas-?, xp=xp-? WHERE uid=?", (perda, perda_xp, uid))
+                ganho = -perda
+            else:
+                con.execute("UPDATE carteira SET torre=0 WHERE uid=?", (uid,))
+
+        elif acao in ("comprar", "roupa"):
+            if acao == "comprar":
+                preco_un = TABELAS["itens"].get(str(dados.get("item", "")))
+                qtd = _int(dados.get("qtd"), 1, 99)
+                if not preco_un:
+                    raise ValueError("item invalido")
+                preco = preco_un * qtd
+            else:
+                r = TABELAS["roupas"].get(str(dados.get("id", "")))
+                if not r:
+                    raise ValueError("roupa invalida")
+                if r["requer"] == "campeao" and not tem_chave(con, uid, "campeao"):
+                    raise ValueError("so para o Campeao")
+                if not marcar_chave(con, uid, "roupa:" + str(dados.get("id"))):
+                    raise ValueError("roupa ja comprada")
+                preco = r["preco"]
+            cur = con.execute("UPDATE carteira SET moedas=moedas-? WHERE uid=? AND moedas>=?", (preco, uid, preco))
+            if cur.rowcount != 1:
+                raise ValueError("moedas insuficientes")
+            ganho = -preco
+
+        else:
+            raise ValueError("acao invalida")
+
+        l = con.execute("SELECT * FROM carteira WHERE uid=?", (uid,)).fetchone()
+        _marcos(con, uid, xp_antes, l["xp"], cristais_ganhos)
+        resp = {"moedas": l["moedas"], "xp": l["xp"], "nivel": nivel_tr(l["xp"]), "ganho": ganho,
+                "torre": l["torre"], "cristais": ver_saldo_con(con, uid)}
+        if cristais_ganhos:
+            resp["cristaisGanhos"] = cristais_ganhos
+        if aviso:
+            resp["aviso"] = aviso
+        return resp
+
+
+# ----------------------------------------------------------------------------
+# Cristais por pagamento externo (Pix / cartao) - pre-programado.
+# O jogo pede um "pedido" e abre um link fora do Telegram. Quando a plataforma
+# de pagamento confirmar, ela chama /api/pagamento/confirmar com a assinatura
+# HMAC (segredo PAGAMENTO_SEGREDO) e os Cristais entram no saldo.
+# ----------------------------------------------------------------------------
+PAGAMENTO_URL = os.environ.get("PAGAMENTO_URL", "")           # checkout da plataforma escolhida
+PAGAMENTO_SEGREDO = os.environ.get("PAGAMENTO_SEGREDO", "")   # segredo do webhook
+URL_PUBLICA = os.environ.get("URL_PUBLICA", "https://147-15-21-209.sslip.io")
+PACOTES_REAIS = {
+    "cristais60": {"titulo": "60 Cristais", "centavos": 490, "cristais": 60},
+    "cristais130": {"titulo": "130 Cristais", "centavos": 990, "cristais": 130},
+    "cristais700": {"titulo": "700 Cristais", "centavos": 4990, "cristais": 700},
+    "cristais1500": {"titulo": "1500 Cristais", "centavos": 9990, "cristais": 1500},
+}
+
+
+def preparar_pedidos(con):
+    con.execute("""CREATE TABLE IF NOT EXISTS pedidos (
+        id TEXT PRIMARY KEY,
+        uid INTEGER NOT NULL,
+        pacote TEXT NOT NULL,
+        centavos INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pendente',
+        criado INTEGER NOT NULL,
+        pago INTEGER,
+        referencia TEXT)""")
+
+
+def criar_pedido(uid, pacote_id):
+    p = PACOTES_REAIS.get(pacote_id)
+    if not p:
+        raise ValueError("pacote invalido")
+    with _trava_banco, banco() as con:
+        abertos = con.execute("SELECT COUNT(*) FROM pedidos WHERE uid=? AND status='pendente' AND criado>?", (uid, int(time.time()) - 3600)).fetchone()[0]
+        if abertos >= 5:
+            raise ValueError("muitos pedidos abertos")
+        pid = "P" + "".join(random.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(11))
+        con.execute("INSERT INTO pedidos (id, uid, pacote, centavos, criado) VALUES (?,?,?,?,?)",
+                    (pid, uid, pacote_id, p["centavos"], int(time.time())))
+    # So o codigo do pedido vai no link: nada de dados pessoais na URL.
+    base = PAGAMENTO_URL or (URL_PUBLICA + "/pagar")
+    link = base + ("&" if "?" in base else "?") + urllib.parse.urlencode({"pedido": pid})
+    return {"pedido": pid, "link": link, "valor": p["centavos"]}
+
+
+def confirmar_pedido(pid, referencia=""):
+    """Credita os Cristais de um pedido pago (uma unica vez)."""
+    with _trava_banco, banco() as con:
+        l = con.execute("SELECT * FROM pedidos WHERE id=?", (pid,)).fetchone()
+        if not l:
+            raise ValueError("pedido inexistente")
+        if l["status"] == "pago":
+            return False
+        con.execute("UPDATE pedidos SET status='pago', pago=?, referencia=? WHERE id=? AND status='pendente'",
+                    (int(time.time()), str(referencia)[:120], pid))
+        creditar(con, l["uid"], PACOTES_REAIS[l["pacote"]]["cristais"])
+        con.execute("INSERT INTO compras (uid, pacote, estrelas, cobranca, criado, entregue) VALUES (?,?,?,?,?,1)",
+                    (l["uid"], l["pacote"], 0, "pedido:" + pid, int(time.time())))
+    try:
+        enviar(l["uid"], "💎 Pagamento confirmado! %s já estão no seu saldo." % PACOTES_REAIS[l["pacote"]]["titulo"], teclado_jogar())
+    except Exception:
+        pass
+    return True
+
+
+def ver_pedido(pid):
+    with _trava_banco, banco() as con:
+        l = con.execute("SELECT id, pacote, centavos, status FROM pedidos WHERE id=?", (str(pid)[:20],)).fetchone()
+    return dict(l) if l else None
+
+
+def pagina_pagar(pid):
+    """Pagina provisoria de checkout. Quando a plataforma for escolhida, ela
+    passa a criar o Pix/cartao aqui (ou PAGAMENTO_URL aponta direto para ela)."""
+    p = ver_pedido(pid)
+    if not p:
+        corpo = "<h1>Pedido não encontrado</h1><p>Volte ao jogo e tente de novo.</p>"
+    else:
+        pac = PACOTES_REAIS[p["pacote"]]
+        valor = "R$ %d,%02d" % (p["centavos"] // 100, p["centavos"] % 100)
+        if p["status"] == "pago":
+            corpo = "<h1>✅ Pago!</h1><p>%s já estão na sua conta. Pode voltar ao jogo.</p>" % pac["titulo"]
+        else:
+            corpo = ("<h1>💎 %s</h1><p class=v>%s</p><p>Pedido <b>%s</b></p>"
+                     "<div class=box>Pagamento por <b>Pix</b> ou <b>cartão de crédito</b> chegando em breve.<br>"
+                     "Nenhuma cobrança foi feita.</div>") % (pac["titulo"], valor, p["id"])
+    html = ("<!doctype html><html lang=pt-BR><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+            "<title>Domadores de Feras · Cristais</title><style>body{margin:0;font-family:system-ui,sans-serif;background:#14121c;color:#eee;"
+            "display:flex;min-height:100vh;align-items:center;justify-content:center;padding:16px}main{max-width:420px;text-align:center}"
+            "h1{font-size:24px}.v{font-size:32px;font-weight:700;color:#f5c542}.box{background:#211d2e;border-radius:12px;padding:16px;margin-top:16px}"
+            "</style></head><body><main>%s</main></body></html>") % corpo
+    return html.encode("utf-8")
+
+
+def webhook_pagamento(corpo_bruto, assinatura):
+    """Chamado pela plataforma de pagamento (ou por um adaptador nosso)."""
+    if not PAGAMENTO_SEGREDO:
+        raise ValueError("pagamento externo ainda nao configurado")
+    esperado = hmac.new(PAGAMENTO_SEGREDO.encode(), corpo_bruto, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(esperado, str(assinatura or "")):
+        raise PermissionError("assinatura invalida")
+    dados = json.loads(corpo_bruto.decode("utf-8") or "{}")
+    if dados.get("status") != "pago":
+        return False
+    p = ver_pedido(dados.get("pedido", ""))
+    if not p:
+        raise ValueError("pedido inexistente")
+    if _int(dados.get("valor"), 0, 10 ** 9) < p["centavos"]:
+        raise ValueError("valor diferente do pedido")
+    return confirmar_pedido(p["id"], dados.get("referencia", ""))
 
 
 # ----------------------------------------------------------------------------
@@ -590,6 +1044,15 @@ class Api(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True, "versao": VERSAO})
         if self.path.startswith("/api/ranking"):
             return self._json(200, {"ok": True, "top": top_ranking(50)})
+        if self.path.startswith("/pagar"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            dados = pagina_pagar((q.get("pedido") or [""])[0])
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(dados)))
+            self.end_headers()
+            self.wfile.write(dados)
+            return
         return self._json(404, {"ok": False})
 
     def do_POST(self):
@@ -597,18 +1060,33 @@ class Api(BaseHTTPRequestHandler):
             tamanho = int(self.headers.get("Content-Length", "0"))
             if tamanho > 20000:
                 return self._json(413, {"ok": False, "erro": "grande demais"})
-            corpo = json.loads(self.rfile.read(tamanho).decode("utf-8") or "{}")
+            bruto = self.rfile.read(tamanho)
+            if self.path.startswith("/api/pagamento/confirmar"):
+                try:
+                    novo = webhook_pagamento(bruto, self.headers.get("X-Assinatura", ""))
+                    return self._json(200, {"ok": True, "creditado": novo})
+                except PermissionError:
+                    return self._json(403, {"ok": False, "erro": "assinatura invalida"})
+                except ValueError as e:
+                    return self._json(400, {"ok": False, "erro": str(e)})
+            corpo = json.loads(bruto.decode("utf-8") or "{}")
         except (ValueError, TypeError):
             return self._json(400, {"ok": False, "erro": "json invalido"})
         usuario = validar_init_data(corpo.get("initData", ""))
         if not usuario:
             return self._json(401, {"ok": False, "erro": "nao autorizado"})
         uid = usuario["id"]
-        if not limitar_taxa(uid):
+        if not limitar_taxa(uid, 90):
             return self._json(429, {"ok": False, "erro": "muitas requisicoes"})
         try:
-            if self.path.startswith("/api/fatura"):
-                return self._json(200, {"ok": True, "link": criar_fatura(uid, corpo.get("pacote", ""))})
+            if self.path.startswith("/api/moedas"):
+                r = moedas_acao(usuario, corpo)
+                r["ok"] = True
+                return self._json(200, r)
+            if self.path.startswith("/api/pedido"):
+                r = criar_pedido(uid, str(corpo.get("pacote", "")))
+                r["ok"] = True
+                return self._json(200, r)
             if self.path.startswith("/api/resgatar"):
                 return self._json(200, {"ok": True, "pacotes": resgatar(uid), "cristais": ver_saldo(uid)})
             if self.path.startswith("/api/saldo"):
