@@ -42,7 +42,7 @@ URL_JOGO = os.environ.get("URL_JOGO", "https://iurerodrigues.github.io/jogo/")
 BANCO = os.environ.get("BANCO", "/opt/bot/dados.db")
 PORTA = int(os.environ.get("PORTA", "8080"))
 ORIGENS = {"https://iurerodrigues.github.io"}
-VERSAO = "2.7"
+VERSAO = "2.8"
 
 # Precos em estrelas. Devem bater com PACOTES_VIP do jogo.
 # Pacotes de Cristais (moeda VIP) vendidos em Telegram Stars
@@ -1129,6 +1129,22 @@ class Api(BaseHTTPRequestHandler):
             if self.path.startswith("/api/admin/reivindicar"):
                 reivindicar_admin(usuario, corpo.get("codigo"))
                 return self._json(200, {"ok": True, "admin": True})
+            if self.path.startswith("/api/boss/info"):
+                r = boss_info(uid)
+                r["ok"] = True
+                return self._json(200, r)
+            if self.path.startswith("/api/boss/iniciar"):
+                r = boss_iniciar(usuario, corpo.get("nome"))
+                r["ok"] = True
+                return self._json(200, r)
+            if self.path.startswith("/api/boss/dano"):
+                r = boss_dano(uid, corpo.get("bilhete"), corpo.get("dano"), corpo.get("turnos"))
+                r["ok"] = True
+                return self._json(200, r)
+            if self.path.startswith("/api/boss/premios"):
+                r = boss_premios(uid)
+                r["ok"] = True
+                return self._json(200, r)
             if self.path.startswith("/api/admin/ia/chave"):
                 try:
                     salvar_chave_ia(uid, corpo.get("chave"), corpo.get("modelo"))
@@ -1347,6 +1363,175 @@ def assistente_ia(uid, pedido, contexto):
     except ValueError:
         raise ValueError("a IA devolveu um formato estranho, tente reescrever o pedido")
     return resposta
+
+
+
+# ----------------------------------------------------------------------------
+# BOSS SEMANAL: uma fera gigante com vida compartilhada por todo o servidor.
+# Cada jogador tem algumas tentativas por dia; o dano de cada tentativa soma
+# no ranking da semana. Na virada da semana (segunda-feira, horario de Brasilia)
+# todo mundo que participou recebe premio: o podio ganha muito mais.
+#   POST /api/boss/info     -> boss da semana, vida, ranking, minhas tentativas
+#   POST /api/boss/iniciar  -> gasta uma tentativa e devolve um bilhete
+#   POST /api/boss/dano     -> {bilhete, dano, turnos} registra o dano
+#   POST /api/boss/premios  -> entrega os premios de semanas encerradas
+# ----------------------------------------------------------------------------
+BOSS_ROTACAO = ["nyxor", "solarion", "abissal", "tempestor", "gaianor", "titanor", "toxirion", "boreon"]
+BOSS_TURNOS = 10
+# premio por posicao: (moedas, cristais, itens)
+BOSS_PREMIOS = [
+    (1, 1, 20000, 10, {"ultraEsfera": 3, "cristalPerfeito": 1}),
+    (2, 2, 12000, 6, {"ultraEsfera": 2, "doceRaro": 3}),
+    (3, 3, 8000, 4, {"ultraEsfera": 1, "doceRaro": 2}),
+    (4, 10, 4000, 1, {"superEsfera": 3}),
+    (11, 10 ** 9, 1000, 0, {"superEsfera": 2}),
+]
+BOSS_BONUS_DERROTA = 2000  # todos ganham a mais se o boss cair
+
+
+def _tabelas_boss(con):
+    con.execute("""CREATE TABLE IF NOT EXISTS boss_semana (
+        semana TEXT PRIMARY KEY, especie TEXT, hp_total INTEGER, hp INTEGER, fechado INTEGER DEFAULT 0, derrotado_em INTEGER)""")
+    con.execute("""CREATE TABLE IF NOT EXISTS boss_dano (
+        semana TEXT, uid INTEGER, nome TEXT, dano INTEGER DEFAULT 0, tentativas INTEGER DEFAULT 0, dia TEXT, tent_dia INTEGER DEFAULT 0,
+        PRIMARY KEY (semana, uid))""")
+    con.execute("""CREATE TABLE IF NOT EXISTS boss_bilhete (
+        codigo TEXT PRIMARY KEY, uid INTEGER, semana TEXT, criado REAL, usado INTEGER DEFAULT 0)""")
+    con.execute("""CREATE TABLE IF NOT EXISTS boss_premio (
+        uid INTEGER, semana TEXT, posicao INTEGER, dano INTEGER, moedas INTEGER, cristais INTEGER, itens TEXT, entregue INTEGER DEFAULT 0,
+        PRIMARY KEY (uid, semana))""")
+
+
+def _numero_semana(semana):
+    t = time.strptime(semana[1:], "%Y-%m-%d")
+    return int(time.mktime(t) // (7 * 86400))
+
+
+def _boss_atual(con):
+    sem = semana_br()
+    l = con.execute("SELECT * FROM boss_semana WHERE semana=?", (sem,)).fetchone()
+    if not l:
+        especie = BOSS_ROTACAO[_numero_semana(sem) % len(BOSS_ROTACAO)]
+        hp = int(regra_jogo("bossHp", 300000, 10000, 10 ** 9))
+        con.execute("INSERT OR IGNORE INTO boss_semana (semana, especie, hp_total, hp) VALUES (?,?,?,?)", (sem, especie, hp, hp))
+        l = con.execute("SELECT * FROM boss_semana WHERE semana=?", (sem,)).fetchone()
+    return l
+
+
+def _fechar_semanas(con):
+    """Distribui os premios das semanas que ja acabaram (so uma vez cada)."""
+    sem = semana_br()
+    for b in con.execute("SELECT * FROM boss_semana WHERE fechado=0 AND semana<>?", (sem,)).fetchall():
+        linhas = con.execute("SELECT uid, dano FROM boss_dano WHERE semana=? AND dano>0 ORDER BY dano DESC, uid ASC", (b["semana"],)).fetchall()
+        for pos, l in enumerate(linhas, 1):
+            for ini, fim, moedas, cristais, itens in BOSS_PREMIOS:
+                if ini <= pos <= fim:
+                    break
+            if b["hp"] <= 0:
+                moedas += BOSS_BONUS_DERROTA
+            con.execute("INSERT OR IGNORE INTO boss_premio (uid, semana, posicao, dano, moedas, cristais, itens) VALUES (?,?,?,?,?,?,?)",
+                        (l["uid"], b["semana"], pos, l["dano"], moedas, cristais, json.dumps(itens)))
+        con.execute("UPDATE boss_semana SET fechado=1 WHERE semana=?", (b["semana"],))
+        log("boss semanal encerrado", b["semana"], "participantes", len(linhas))
+
+
+def _max_tentativas(con, uid):
+    base = int(regra_jogo("bossTentativas", 3, 1, 50))
+    return base + (1 if vip_ativo(con, uid) else 0)
+
+
+def boss_info(uid):
+    with _trava_banco, banco() as con:
+        _tabelas_boss(con)
+        _fechar_semanas(con)
+        b = _boss_atual(con)
+        eu = con.execute("SELECT * FROM boss_dano WHERE semana=? AND uid=?", (b["semana"], uid)).fetchone()
+        top = con.execute("SELECT nome, dano FROM boss_dano WHERE semana=? AND dano>0 ORDER BY dano DESC, uid ASC LIMIT 20", (b["semana"],)).fetchall()
+        total = con.execute("SELECT COUNT(*) FROM boss_dano WHERE semana=? AND dano>0", (b["semana"],)).fetchone()[0]
+        pos = None
+        if eu and eu["dano"] > 0:
+            pos = con.execute("SELECT COUNT(*) FROM boss_dano WHERE semana=? AND (dano>? OR (dano=? AND uid<?))", (b["semana"], eu["dano"], eu["dano"], uid)).fetchone()[0] + 1
+        usadas = eu["tent_dia"] if eu and eu["dia"] == dia_br() else 0
+        pend = con.execute("SELECT COUNT(*) FROM boss_premio WHERE uid=? AND entregue=0", (uid,)).fetchone()[0]
+        maxt = _max_tentativas(con, uid)
+    fim_semana = time.mktime(time.strptime(b["semana"][1:], "%Y-%m-%d")) + 7 * 86400 + 3 * 3600  # segunda 00:00 em Brasilia
+    return {"semana": b["semana"], "especie": b["especie"], "hpTotal": b["hp_total"], "hp": max(0, b["hp"]), "turnos": BOSS_TURNOS,
+            "acabaEm": int(max(0, fim_semana - time.time())), "tentativas": max(0, maxt - usadas), "maxTentativas": maxt,
+            "meuDano": eu["dano"] if eu else 0, "minhaPos": pos, "participantes": total,
+            "top": [dict(t) for t in top], "premiosPendentes": pend,
+            "premios": [{"de": a, "ate": z, "moedas": m, "cristais": c, "itens": i} for a, z, m, c, i in BOSS_PREMIOS], "bonusDerrota": BOSS_BONUS_DERROTA}
+
+
+def boss_iniciar(usuario, nome):
+    uid = usuario["id"]
+    nome = re.sub(r"[^\w .-]", "", str(nome or ""), flags=re.UNICODE).strip()[:16] or (usuario.get("first_name") or "Domador")[:16]
+    with _trava_banco, banco() as con:
+        _tabelas_boss(con)
+        b = _boss_atual(con)
+        if b["hp"] <= 0:
+            raise ValueError("boss ja derrotado")
+        eu = con.execute("SELECT * FROM boss_dano WHERE semana=? AND uid=?", (b["semana"], uid)).fetchone()
+        usadas = eu["tent_dia"] if eu and eu["dia"] == dia_br() else 0
+        if usadas >= _max_tentativas(con, uid):
+            raise ValueError("sem tentativas hoje")
+        con.execute("""INSERT INTO boss_dano (semana, uid, nome, dano, tentativas, dia, tent_dia) VALUES (?,?,?,0,1,?,1)
+            ON CONFLICT(semana, uid) DO UPDATE SET nome=excluded.nome, tentativas=tentativas+1, tent_dia=?, dia=?""",
+                    (b["semana"], uid, nome, dia_br(), usadas + 1, dia_br()))
+        codigo = "%x%x" % (int(time.time() * 1000), random.getrandbits(40))
+        con.execute("INSERT INTO boss_bilhete (codigo, uid, semana, criado) VALUES (?,?,?,?)", (codigo, uid, b["semana"], time.time()))
+        l = carteira(con, uid, None)
+        nv = nivel_tr(l["xp"])
+    return {"bilhete": codigo, "hp": max(0, b["hp"]), "hpTotal": b["hp_total"], "especie": b["especie"], "turnos": BOSS_TURNOS, "nivelTreinador": nv}
+
+
+def boss_dano(uid, bilhete, dano, turnos):
+    with _trava_banco, banco() as con:
+        _tabelas_boss(con)
+        t = con.execute("SELECT * FROM boss_bilhete WHERE codigo=? AND uid=?", (str(bilhete or ""), uid)).fetchone()
+        if not t or t["usado"]:
+            raise ValueError("bilhete invalido")
+        con.execute("UPDATE boss_bilhete SET usado=1 WHERE codigo=?", (t["codigo"],))
+        turnos = _int(turnos, 1, BOSS_TURNOS)
+        decorrido = time.time() - t["criado"]
+        # limite de bom senso: cada turno leva alguns segundos e o dano depende do nivel que o jogador comanda
+        l = carteira(con, uid, None)
+        lv = limite_nivel(nivel_tr(l["xp"])) + 6
+        teto = int(min(turnos, max(1, decorrido / 1.5)) * (lv * 120 + 600) * regra_jogo("bossTeto", 1, 0.1, 10) * regra_jogo("danoBoss", 25, 1, 100) / 25)
+        dano = max(0, min(_int(dano, 0, 10 ** 9), teto))
+        b = con.execute("SELECT * FROM boss_semana WHERE semana=?", (t["semana"],)).fetchone()
+        if not b or b["fechado"]:
+            raise ValueError("semana encerrada")
+        dano = min(dano, max(0, b["hp"]))
+        con.execute("UPDATE boss_semana SET hp=hp-? WHERE semana=?", (dano, b["semana"]))
+        derrubou = b["hp"] > 0 and b["hp"] - dano <= 0
+        if derrubou:
+            con.execute("UPDATE boss_semana SET derrotado_em=? WHERE semana=?", (int(time.time()), b["semana"]))
+        con.execute("UPDATE boss_dano SET dano=dano+? WHERE semana=? AND uid=?", (dano, b["semana"], uid))
+        meu = con.execute("SELECT dano FROM boss_dano WHERE semana=? AND uid=?", (b["semana"], uid)).fetchone()["dano"]
+        pos = con.execute("SELECT COUNT(*) FROM boss_dano WHERE semana=? AND (dano>? OR (dano=? AND uid<?))", (b["semana"], meu, meu, uid)).fetchone()[0] + 1
+    if derrubou:
+        log("boss semanal derrotado", b["semana"], "golpe final de", uid)
+    return {"dano": dano, "meuDano": meu, "posicao": pos, "hp": max(0, b["hp"] - dano), "derrubou": derrubou}
+
+
+def boss_premios(uid):
+    entregues = []
+    with _trava_banco, banco() as con:
+        _tabelas_boss(con)
+        _fechar_semanas(con)
+        for p in con.execute("SELECT * FROM boss_premio WHERE uid=? AND entregue=0", (uid,)).fetchall():
+            con.execute("UPDATE boss_premio SET entregue=1 WHERE uid=? AND semana=?", (uid, p["semana"]))
+            l = carteira(con, uid, None)
+            if p["moedas"]:
+                _ganhar(con, l, p["moedas"], repetivel=False)
+            if p["cristais"]:
+                creditar(con, uid, p["cristais"])
+            entregues.append({"semana": p["semana"], "posicao": p["posicao"], "dano": p["dano"], "moedas": p["moedas"],
+                              "cristais": p["cristais"], "itens": json.loads(p["itens"] or "{}")})
+        l = carteira(con, uid, None)
+        moedas = l["moedas"]
+        cristais = con.execute("SELECT cristais FROM saldo WHERE uid=?", (uid,)).fetchone()
+    return {"entregues": entregues, "moedas": moedas, "cristais": cristais["cristais"] if cristais else 0}
 
 
 def iniciar_api():
