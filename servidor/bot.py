@@ -42,7 +42,7 @@ URL_JOGO = os.environ.get("URL_JOGO", "https://iurerodrigues.github.io/jogo/")
 BANCO = os.environ.get("BANCO", "/opt/bot/dados.db")
 PORTA = int(os.environ.get("PORTA", "8080"))
 ORIGENS = {"https://iurerodrigues.github.io"}
-VERSAO = "2.8"
+VERSAO = "2.9"
 
 # Precos em estrelas. Devem bater com PACOTES_VIP do jogo.
 # Pacotes de Cristais (moeda VIP) vendidos em Telegram Stars
@@ -1129,6 +1129,10 @@ class Api(BaseHTTPRequestHandler):
             if self.path.startswith("/api/admin/reivindicar"):
                 reivindicar_admin(usuario, corpo.get("codigo"))
                 return self._json(200, {"ok": True, "admin": True})
+            if self.path.startswith("/api/classe"):
+                r = classe_definir(uid, corpo.get("classe"))
+                r["ok"] = True
+                return self._json(200, r)
             if self.path.startswith("/api/boss/info"):
                 r = boss_info(uid)
                 r["ok"] = True
@@ -1532,6 +1536,41 @@ def boss_premios(uid):
         moedas = l["moedas"]
         cristais = con.execute("SELECT cristais FROM saldo WHERE uid=?", (uid,)).fetchone()
     return {"entregues": entregues, "moedas": moedas, "cristais": cristais["cristais"] if cristais else 0}
+
+
+# ----------------------------------------------------------------------------
+# CLASSES DE TREINADOR: a primeira escolha e a primeira troca sao gratis;
+# depois cada troca custa Cristais (regra "custoClasse" do painel ADM).
+#   POST /api/classe {}               -> classe atual
+#   POST /api/classe {classe: "luta"} -> escolhe/troca
+# ----------------------------------------------------------------------------
+CLASSES_VALIDAS = {"luta", "sombra", "fogo", "agua", "planta", "eletrico", "veneno", "rocha", "gelo", "vento", "normal", "geral"}
+
+
+def classe_definir(uid, classe):
+    classe = str(classe or "")
+    with _trava_banco, banco() as con:
+        con.execute("CREATE TABLE IF NOT EXISTS classes (uid INTEGER PRIMARY KEY, classe TEXT, trocas INTEGER DEFAULT 0, desde REAL)")
+        l = con.execute("SELECT classe, trocas FROM classes WHERE uid=?", (uid,)).fetchone()
+        if classe:
+            if classe not in CLASSES_VALIDAS:
+                raise ValueError("classe invalida")
+            if not l:
+                con.execute("INSERT INTO classes (uid, classe, trocas, desde) VALUES (?,?,0,?)", (uid, classe, time.time()))
+            elif l["classe"] == classe:
+                pass
+            elif l["trocas"] < 1:
+                con.execute("UPDATE classes SET classe=?, trocas=1, desde=? WHERE uid=?", (classe, time.time(), uid))
+            else:
+                custo = int(regra_jogo("custoClasse", 100, 0, 10000))
+                if custo > 0:
+                    cur = con.execute("UPDATE saldo SET cristais = cristais - ? WHERE uid=? AND cristais >= ?", (custo, uid, custo))
+                    if cur.rowcount != 1:
+                        raise ValueError("cristais insuficientes")
+                con.execute("UPDATE classes SET classe=?, trocas=trocas+1, desde=? WHERE uid=?", (classe, time.time(), uid))
+            l = con.execute("SELECT classe, trocas FROM classes WHERE uid=?", (uid,)).fetchone()
+        c = con.execute("SELECT cristais FROM saldo WHERE uid=?", (uid,)).fetchone()
+    return {"classe": l["classe"] if l else "", "trocas": l["trocas"] if l else 0, "cristais": c["cristais"] if c else 0}
 
 
 def iniciar_api():
