@@ -41,7 +41,7 @@ URL_JOGO = os.environ.get("URL_JOGO", "https://iurerodrigues.github.io/jogo/")
 BANCO = os.environ.get("BANCO", "/opt/bot/dados.db")
 PORTA = int(os.environ.get("PORTA", "8080"))
 ORIGENS = {"https://iurerodrigues.github.io"}
-VERSAO = "2.5"
+VERSAO = "2.6"
 
 # Precos em estrelas. Devem bater com PACOTES_VIP do jogo.
 # Pacotes de Cristais (moeda VIP) vendidos em Telegram Stars
@@ -63,7 +63,7 @@ CATALOGO = {
 
 # Tabelas do jogo (geradas pelo build a partir de 1_dados.js - nao editar a mao)
 # <<TABELAS_JOGO>>
-TABELAS = json.loads(r'''{"itens":{"esfera":50,"superEsfera":200,"ultraEsfera":600,"pocao":60,"superPocao":180,"antidoto":120,"pedraIgnea":3000,"pedraAbissal":3000,"pedraTrovao":3000,"pedraVerdejante":3000,"pedraLunar":3500,"pedraEterna":2000,"garraAfiada":2500,"escamaDura":2500,"penaVeloz":2500,"amuletoVital":2500,"frutaVital":400,"folhaRegen":4000,"talismaXP":5000,"compartilhadorXP":15000,"lenteFoco":3500,"faixaElemental":4500,"tonicoVital":1000,"tonicoForca":1000,"tonicoGuarda":1000,"tonicoAgil":1000,"ervaReset":1500,"mentaNatureza":6000,"cristalPerfeito":15000,"doceRaro":1200,"incenso":1500},"roupas":{"jaqueta":{"preco":2000,"requer":null},"lenco":{"preco":2500,"requer":null},"chapeu":{"preco":3000,"requer":null},"capa":{"preco":4500,"requer":null},"capuz":{"preco":6000,"requer":null},"armadura":{"preco":9000,"requer":null},"campeao":{"preco":20000,"requer":"campeao"}},"ginasios":[{"premio":800,"qtd":3},{"premio":1200,"qtd":3},{"premio":1700,"qtd":3},{"premio":2200,"qtd":3},{"premio":2800,"qtd":3},{"premio":3500,"qtd":3},{"premio":4200,"qtd":3},{"premio":5000,"qtd":3}],"liga":[{"premio":6000,"qtd":4},{"premio":7000,"qtd":4},{"premio":8000,"qtd":4},{"premio":15000,"qtd":5}],"missoes":{"vitorias":{"alvos":[5,8,12],"por":120,"longo":false},"capturas":{"alvos":[2,3,5],"por":200,"longo":false},"treinadores":{"alvos":[1,2,3],"por":300,"longo":false},"exploracoes":{"alvos":[10,15,25],"por":40,"longo":false},"criticos":{"alvos":[2,4],"por":250,"longo":false},"superEficaz":{"alvos":[5,10],"por":80,"longo":false},"torreAndares":{"alvos":[3,5],"por":200,"longo":false},"evolucoes":{"alvos":[1,2],"por":600,"longo":true},"ovos":{"alvos":[1,2],"por":500,"longo":true}},"periodos":{"dia":{"qtd":3,"mult":1},"semana":{"qtd":4,"mult":6},"mes":{"qtd":5,"mult":22}},"conquistas":{"cap10":{"premio":1000,"cont":"capturas","alvo":10},"cap50":{"premio":5000,"cont":"capturas","alvo":50},"cap150":{"premio":20000,"cont":"capturas","alvo":150},"vit25":{"premio":1500,"cont":"vitorias","alvo":25},"vit100":{"premio":6000,"cont":"vitorias","alvo":100},"vit500":{"premio":30000,"cont":"vitorias","alvo":500},"raro1":{"premio":3000,"cont":"raros","alvo":1},"raro10":{"premio":15000,"cont":"raros","alvo":10},"ovo1":{"premio":1000,"cont":"ovos","alvo":1},"ovo20":{"premio":10000,"cont":"ovos","alvo":20},"evo5":{"premio":2000,"cont":"evolucoes","alvo":5},"ins8":{"premio":10000,"cont":"insignias","alvo":8},"camp":{"premio":20000,"cont":"campeao","alvo":1},"torre10":{"premio":5000,"cont":"torreRecorde","alvo":10},"torre30":{"premio":25000,"cont":"torreRecorde","alvo":30},"arena5":{"premio":5000,"cont":"arena","alvo":5},"dex30":{"premio":8000,"cont":"bestiario","alvo":30},"dexAll":{"premio":100000,"cont":"bestiario","alvo":86}}}''')
+TABELAS = json.loads(r'''{"itens":{"esfera":50,"superEsfera":200,"ultraEsfera":600,"pocao":60,"superPocao":180,"antidoto":120,"pedraIgnea":3000,"pedraAbissal":3000,"pedraTrovao":3000,"pedraVerdejante":3000,"pedraLunar":3500,"pedraEterna":2000,"garraAfiada":2500,"escamaDura":2500,"penaVeloz":2500,"amuletoVital":2500,"orbeArcano":2500,"veuProtetor":2500,"frutaVital":400,"folhaRegen":4000,"talismaXP":5000,"compartilhadorXP":15000,"lenteFoco":3500,"faixaElemental":4500,"tonicoVital":1000,"tonicoForca":1000,"tonicoGuarda":1000,"tonicoAgil":1000,"tonicoMente":1000,"tonicoEspirito":1000,"ervaReset":1500,"mentaNatureza":6000,"cristalPerfeito":15000,"doceRaro":1200,"incenso":1500},"roupas":{"jaqueta":{"preco":2000,"requer":null},"lenco":{"preco":2500,"requer":null},"chapeu":{"preco":3000,"requer":null},"capa":{"preco":4500,"requer":null},"capuz":{"preco":6000,"requer":null},"armadura":{"preco":9000,"requer":null},"campeao":{"preco":20000,"requer":"campeao"}},"ginasios":[{"premio":800,"qtd":3},{"premio":1200,"qtd":3},{"premio":1700,"qtd":3},{"premio":2200,"qtd":3},{"premio":2800,"qtd":3},{"premio":3500,"qtd":3},{"premio":4200,"qtd":3},{"premio":5000,"qtd":3}],"liga":[{"premio":6000,"qtd":4},{"premio":7000,"qtd":4},{"premio":8000,"qtd":4},{"premio":15000,"qtd":5}],"missoes":{"vitorias":{"alvos":[5,8,12],"por":120,"longo":false},"capturas":{"alvos":[2,3,5],"por":200,"longo":false},"treinadores":{"alvos":[1,2,3],"por":300,"longo":false},"exploracoes":{"alvos":[10,15,25],"por":40,"longo":false},"criticos":{"alvos":[2,4],"por":250,"longo":false},"superEficaz":{"alvos":[5,10],"por":80,"longo":false},"torreAndares":{"alvos":[3,5],"por":200,"longo":false},"evolucoes":{"alvos":[1,2],"por":600,"longo":true},"ovos":{"alvos":[1,2],"por":500,"longo":true}},"periodos":{"dia":{"qtd":3,"mult":1},"semana":{"qtd":4,"mult":6},"mes":{"qtd":5,"mult":22}},"conquistas":{"cap10":{"premio":1000,"cont":"capturas","alvo":10},"cap50":{"premio":5000,"cont":"capturas","alvo":50},"cap150":{"premio":20000,"cont":"capturas","alvo":150},"vit25":{"premio":1500,"cont":"vitorias","alvo":25},"vit100":{"premio":6000,"cont":"vitorias","alvo":100},"vit500":{"premio":30000,"cont":"vitorias","alvo":500},"raro1":{"premio":3000,"cont":"raros","alvo":1},"raro10":{"premio":15000,"cont":"raros","alvo":10},"ovo1":{"premio":1000,"cont":"ovos","alvo":1},"ovo20":{"premio":10000,"cont":"ovos","alvo":20},"evo5":{"premio":2000,"cont":"evolucoes","alvo":5},"ins8":{"premio":10000,"cont":"insignias","alvo":8},"camp":{"premio":20000,"cont":"campeao","alvo":1},"torre10":{"premio":5000,"cont":"torreRecorde","alvo":10},"torre30":{"premio":25000,"cont":"torreRecorde","alvo":30},"arena5":{"premio":5000,"cont":"arena","alvo":5},"dex30":{"premio":8000,"cont":"bestiario","alvo":30},"dexAll":{"premio":100000,"cont":"bestiario","alvo":86}}}''')
 # <</TABELAS_JOGO>>
 
 # Trocas entre jogadores
@@ -313,7 +313,7 @@ def posicao(uid):
 
 # ----------------------------------------------------------------------------
 # Trocas entre jogadores
-# fera compacta = [especie, level, xp, hp, variante, iv[4], ev[4], natureza, golpes, item, aura]
+# fera compacta = [especie, level, xp, hp, variante, iv[4 ou 6], ev[4 ou 6], natureza, golpes, item, aura]
 # ----------------------------------------------------------------------------
 def validar_fera(f):
     if not isinstance(f, list) or len(f) < 9:
@@ -325,9 +325,10 @@ def validar_fera(f):
         raise ValueError("nivel invalido")
     if var not in ("", "s", "b"):
         raise ValueError("variante invalida")
-    if not (isinstance(iv, list) and len(iv) == 4 and all(isinstance(x, int) and 0 <= x <= 31 for x in iv)):
+    # 4 atributos (versao antiga) ou 6 (com Ataque e Defesa Especial)
+    if not (isinstance(iv, list) and len(iv) in (4, 6) and all(isinstance(x, int) and 0 <= x <= 31 for x in iv)):
         raise ValueError("IV invalido")
-    if not (isinstance(ev, list) and len(ev) == 4 and all(isinstance(x, int) and 0 <= x <= 252 for x in ev) and sum(ev) <= 510):
+    if not (isinstance(ev, list) and len(ev) in (4, 6) and all(isinstance(x, int) and 0 <= x <= 252 for x in ev) and sum(ev) <= 510):
         raise ValueError("EV invalido")
     if not (isinstance(nat, int) and 0 <= nat < 40):
         raise ValueError("natureza invalida")
@@ -1044,6 +1045,9 @@ class Api(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True, "versao": VERSAO})
         if self.path.startswith("/api/ranking"):
             return self._json(200, {"ok": True, "top": top_ranking(50)})
+        if self.path.startswith("/api/config"):
+            cfg, versao = ler_config()
+            return self._json(200, {"ok": True, "config": cfg, "versao": versao})
         if self.path.startswith("/pagar"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             dados = pagina_pagar((q.get("pedido") or [""])[0])
@@ -1058,7 +1062,7 @@ class Api(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             tamanho = int(self.headers.get("Content-Length", "0"))
-            if tamanho > 20000:
+            if tamanho > (CONFIG_MAX + 8000 if self.path.startswith("/api/admin/config") else 20000):
                 return self._json(413, {"ok": False, "erro": "grande demais"})
             bruto = self.rfile.read(tamanho)
             if self.path.startswith("/api/pagamento/confirmar"):
@@ -1112,6 +1116,17 @@ class Api(BaseHTTPRequestHandler):
                 r = troca_minhas(uid)
                 r["ok"] = True
                 return self._json(200, r)
+            if self.path.startswith("/api/admin/eu"):
+                return self._json(200, {"ok": True, "admin": eh_admin(uid), "id": uid})
+            if self.path.startswith("/api/admin/reivindicar"):
+                reivindicar_admin(usuario, corpo.get("codigo"))
+                return self._json(200, {"ok": True, "admin": True})
+            if self.path.startswith("/api/admin/config"):
+                try:
+                    versao = gravar_config(uid, corpo.get("config"))
+                except PermissionError:
+                    return self._json(403, {"ok": False, "erro": "so administrador"})
+                return self._json(200, {"ok": True, "versao": versao})
             if self.path.startswith("/api/ranking"):
                 pontos = salvar_ranking(usuario, corpo.get("dados") or {})
                 return self._json(200, {"ok": True, "pontos": pontos, "posicao": posicao(uid)})
@@ -1121,6 +1136,71 @@ class Api(BaseHTTPRequestHandler):
             log("erro na api", traceback.format_exc())
             return self._json(500, {"ok": False, "erro": "erro interno"})
         return self._json(404, {"ok": False})
+
+
+# ----------------------------------------------------------------------------
+# Painel ADM: balanceamento do jogo editado pelo dono, sem mexer no codigo
+#   POST /api/admin/eu          -> {admin: bool}
+#   POST /api/admin/reivindicar -> {codigo} vira administrador (codigo secreto, so o hash fica aqui)
+#   POST /api/admin/config      -> {config} grava o balanceamento (so administrador)
+#   GET  /api/config            -> balanceamento atual (o jogo baixa ao abrir)
+# ----------------------------------------------------------------------------
+HASH_CODIGO_ADM = "00dc785dab0875b5d382cd07aaf7b4fb571a8e3e0c4cd480d7ae31709eb21c1a"
+CONFIG_MAX = 400000
+
+
+def _tabelas_adm(con):
+    con.execute("CREATE TABLE IF NOT EXISTS admins (uid INTEGER PRIMARY KEY, nome TEXT, desde REAL)")
+    con.execute("CREATE TABLE IF NOT EXISTS config_jogo (id INTEGER PRIMARY KEY CHECK (id = 1), valor TEXT, versao INTEGER, atualizado REAL, por INTEGER)")
+
+
+def eh_admin(uid):
+    with _trava_banco, banco() as con:
+        _tabelas_adm(con)
+        return con.execute("SELECT 1 FROM admins WHERE uid=?", (uid,)).fetchone() is not None
+
+
+def reivindicar_admin(usuario, codigo):
+    codigo = str(codigo or "").strip().upper()
+    if not codigo or hashlib.sha256(codigo.encode()).hexdigest() != HASH_CODIGO_ADM:
+        time.sleep(1.5)
+        raise ValueError("codigo invalido")
+    with _trava_banco, banco() as con:
+        _tabelas_adm(con)
+        con.execute("INSERT OR REPLACE INTO admins (uid, nome, desde) VALUES (?, ?, ?)",
+                    (usuario["id"], str(usuario.get("first_name", ""))[:40], time.time()))
+    log("novo administrador", usuario["id"])
+    return True
+
+
+def ler_config():
+    with _trava_banco, banco() as con:
+        _tabelas_adm(con)
+        l = con.execute("SELECT valor, versao FROM config_jogo WHERE id=1").fetchone()
+    if not l:
+        return {}, 0
+    try:
+        return json.loads(l["valor"]), l["versao"]
+    except ValueError:
+        return {}, 0
+
+
+def gravar_config(uid, cfg):
+    if not isinstance(cfg, dict):
+        raise ValueError("config invalida")
+    texto = json.dumps(cfg, ensure_ascii=False, separators=(",", ":"))
+    if len(texto) > CONFIG_MAX:
+        raise ValueError("config grande demais")
+    with _trava_banco, banco() as con:
+        _tabelas_adm(con)
+        if con.execute("SELECT 1 FROM admins WHERE uid=?", (uid,)).fetchone() is None:
+            raise PermissionError("so administrador")
+        l = con.execute("SELECT versao FROM config_jogo WHERE id=1").fetchone()
+        versao = (l["versao"] if l else 0) + 1
+        con.execute("INSERT OR REPLACE INTO config_jogo (id, valor, versao, atualizado, por) VALUES (1, ?, ?, ?, ?)",
+                    (texto, versao, time.time(), uid))
+    log("config do jogo atualizada", versao, "por", uid)
+    return versao
 
 
 def iniciar_api():
