@@ -38,6 +38,8 @@ class ServidorThreads(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
+TOKEN_ANTIGO = ""          # bot anterior (so redireciona para o novo)
+BOT_ANTIGO = ""
 URL_JOGO = os.environ.get("URL_JOGO", "https://iurerodrigues.github.io/jogo/")
 BOT_USUARIO = os.environ.get("BOT_USUARIO", "TPPCrpgbot")
 
@@ -74,7 +76,7 @@ COMANDOS_BOT = [
 BANCO = os.environ.get("BANCO", "/opt/bot/dados.db")
 PORTA = int(os.environ.get("PORTA", "8080"))
 ORIGENS = {"https://iurerodrigues.github.io"}
-VERSAO = "3.2"
+VERSAO = "3.3"
 
 # Precos em estrelas. Devem bater com PACOTES_VIP do jogo.
 # Pacotes de Cristais (moeda VIP) vendidos em Telegram Stars
@@ -194,8 +196,8 @@ def preparar_banco():
 # ----------------------------------------------------------------------------
 # API do Telegram
 # ----------------------------------------------------------------------------
-def tg(metodo, limite_http=60, **params):
-    url = "https://api.telegram.org/bot%s/%s" % (TOKEN, metodo)
+def tg(metodo, limite_http=60, _token=None, **params):
+    url = "https://api.telegram.org/bot%s/%s" % (_token or TOKEN, metodo)
     dados = json.dumps(params).encode("utf-8")
     req = urllib.request.Request(url, data=dados, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=limite_http) as r:
@@ -230,14 +232,23 @@ def enviar(chat_id, texto, teclado=None):
 # Validacao do initData (https://core.telegram.org/bots/webapps)
 # ----------------------------------------------------------------------------
 def validar_init_data(init_data, max_idade=86400):
-    if not init_data or not TOKEN:
+    for tk in (TOKEN, TOKEN_ANTIGO):
+        if tk:
+            u = _validar_com(init_data, tk, max_idade)
+            if u:
+                return u
+    return None
+
+
+def _validar_com(init_data, token, max_idade):
+    if not init_data or not token:
         return None
     pares = dict(urllib.parse.parse_qsl(init_data, keep_blank_values=True))
     recebido = pares.pop("hash", None)
     if not recebido:
         return None
     verificacao = "\n".join("%s=%s" % (k, pares[k]) for k in sorted(pares))
-    chave = hmac.new(b"WebAppData", TOKEN.encode(), hashlib.sha256).digest()
+    chave = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
     calculado = hmac.new(chave, verificacao.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(calculado, recebido):
         return None
@@ -610,7 +621,7 @@ def carteira(con, uid, local=None):
             con.execute("UPDATE carteira SET dia=?, ganho_dia=0, lend_dia=0, libertar_dia=0, arena_dia=0 WHERE uid=?", (dia_br(), uid))
             l = con.execute("SELECT * FROM carteira WHERE uid=?", (uid,)).fetchone()
         return l
-    local = local or {}
+    local = (local or {}) if str(temporada()) == "1" else {}
     moedas = _int(local.get("d", 500), 0, MIGRACAO_MAX_MOEDAS)
     xp = _int(local.get("x", 0), 0, MIGRACAO_MAX_XP)
     con.execute("INSERT INTO carteira (uid, moedas, xp, dia, criado) VALUES (?,?,?,?,?)",
@@ -1051,14 +1062,19 @@ def tratar_pre_checkout(q):
 
 def laco_bot():
     deslocamento = 0
-    try:
-        tg("deleteWebhook", drop_pending_updates=False)
-    except Exception:
-        pass
+    token_atual = None
     log("bot iniciado, versao", VERSAO)
     while True:
+        if token_atual != TOKEN:
+            token_atual = TOKEN
+            deslocamento = 0
+            try:
+                tg("deleteWebhook", drop_pending_updates=False)
+            except Exception:
+                pass
+            log("polling no bot", BOT_USUARIO)
         try:
-            atualizacoes = tg("getUpdates", limite_http=70, offset=deslocamento, timeout=50,
+            atualizacoes = tg("getUpdates", limite_http=70, offset=deslocamento, timeout=25,
                               allowed_updates=["message", "pre_checkout_query"])
             for u in atualizacoes:
                 deslocamento = u["update_id"] + 1
@@ -1126,7 +1142,7 @@ class Api(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True, "top": top_ranking(50)})
         if self.path.startswith("/api/config"):
             cfg, versao = ler_config()
-            return self._json(200, {"ok": True, "config": cfg, "versao": versao})
+            return self._json(200, {"ok": True, "config": cfg, "versao": versao, "temporada": temporada(), "bot": BOT_USUARIO})
         if self.path.startswith("/pagar"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             dados = pagina_pagar((q.get("pedido") or [""])[0])
@@ -1161,7 +1177,30 @@ class Api(BaseHTTPRequestHandler):
         uid = usuario["id"]
         if not limitar_taxa(uid, 150):
             return self._json(429, {"ok": False, "erro": "muitas requisicoes"})
+        if corpo.get("temporada") and str(corpo.get("temporada")) != str(temporada()):
+            return self._json(409, {"ok": False, "erro": "nova temporada", "temporada": temporada()})
         try:
+            if self.path.startswith("/api/admin/bot/"):
+                if not eh_admin(uid):
+                    return self._json(403, {"ok": False, "erro": "so administrador"})
+                acao = self.path.split("/api/admin/bot/")[1].split("?")[0]
+                if acao == "info":
+                    carregar_marca()
+                    return self._json(200, {"ok": True, "usuario": BOT_USUARIO, "antigo": BOT_ANTIGO, "temporada": temporada(),
+                                            "comunidade": MARCA["comunidade"], "canal": MARCA["canal"], "canal_id": MARCA["canal_id"]})
+                if acao == "token":
+                    r = trocar_bot(uid, corpo.get("token"), bool(corpo.get("zerar")))
+                    r["ok"] = True
+                    return self._json(200, r)
+                if acao == "links":
+                    for k in ("comunidade", "canal", "canal_id"):
+                        v = str(corpo.get(k) or "").strip()[:200]
+                        kv_gravar("marca_" + k, v)
+                        MARCA[k] = v
+                    return self._json(200, {"ok": True})
+                if acao == "zerar":
+                    return self._json(200, {"ok": True, "temporada": zerar_jogadores(uid)})
+                return self._json(404, {"ok": False})
             if self.path.startswith("/api/moedas"):
                 r = moedas_acao(usuario, corpo)
                 r["ok"] = True
@@ -1969,6 +2008,108 @@ def pagar_convites(con, uid, nv):
     return l["por"]
 
 
+# --- troca de bot e nova temporada ---
+TABELAS_MANTIDAS = {"admins", "config_jogo", "segredos", "kv", "compras", "pedidos", "sqlite_sequence"}
+_temporada_cache = [None]
+
+
+def temporada():
+    if _temporada_cache[0] is None:
+        try:
+            _temporada_cache[0] = int(kv_ler("temporada", "1") or 1)
+        except ValueError:
+            _temporada_cache[0] = 1
+    return _temporada_cache[0]
+
+
+def zerar_jogadores(uid):
+    """Nova temporada: apaga o progresso de todos (mantem admins, balanceamento, chaves e historico de pagamentos)."""
+    with _trava_banco, banco() as con:
+        tabelas = [l[0] for l in con.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+        for t in tabelas:
+            if t not in TABELAS_MANTIDAS:
+                con.execute('DELETE FROM "%s"' % t)
+    nova = temporada() + 1
+    kv_gravar("temporada", nova)
+    _temporada_cache[0] = nova
+    try:
+        ARENA_FILA.clear()
+        ARENA_PARTIDAS.clear()
+    except Exception:
+        pass
+    log("NOVA TEMPORADA", nova, "por", uid)
+    return nova
+
+
+def carregar_bot():
+    """Se o ADM cadastrou um bot novo, ele vira o oficial e o do ambiente so redireciona."""
+    global TOKEN, TOKEN_ANTIGO, BOT_USUARIO, BOT_ANTIGO
+    with _trava_banco, banco() as con:
+        novo = _segredo(con, "bot_token")
+    if novo and novo != TOKEN:
+        TOKEN_ANTIGO, BOT_ANTIGO = TOKEN, kv_ler("bot_antigo", BOT_USUARIO)
+        TOKEN = novo
+        BOT_USUARIO = kv_ler("bot_usuario", BOT_USUARIO)
+        threading.Thread(target=laco_antigo, daemon=True).start()
+
+
+def trocar_bot(uid, token, zerar):
+    global TOKEN, TOKEN_ANTIGO, BOT_USUARIO, BOT_ANTIGO
+    token = str(token or "").strip()
+    if not re.match(r"^\d+:[\w-]{30,}$", token):
+        raise ValueError("chave invalida")
+    try:
+        eu = tg("getMe", _token=token)
+    except Exception:
+        raise ValueError("o Telegram nao aceitou essa chave")
+    if token == TOKEN:
+        raise ValueError("esse ja e o bot ativo")
+    antigo_token = TOKEN_ANTIGO or TOKEN
+    antigo_nome = BOT_ANTIGO or BOT_USUARIO
+    with _trava_banco, banco() as con:
+        _segredo(con, "bot_token", token)
+    kv_gravar("bot_usuario", eu["username"])
+    kv_gravar("bot_antigo", antigo_nome)
+    kv_gravar("perfil_versao", "")
+    ja_tinha_antigo = bool(TOKEN_ANTIGO)
+    TOKEN_ANTIGO, BOT_ANTIGO = antigo_token, antigo_nome
+    TOKEN, BOT_USUARIO = token, eu["username"]
+    if not ja_tinha_antigo:
+        threading.Thread(target=laco_antigo, daemon=True).start()
+    threading.Thread(target=lambda: (time.sleep(3), aplicar_perfil_bot(True)), daemon=True).start()
+    temp = zerar_jogadores(uid) if zerar else temporada()
+    log("bot trocado para", BOT_USUARIO, "por", uid)
+    return {"usuario": BOT_USUARIO, "temporada": temp}
+
+
+def laco_antigo():
+    """O bot antigo responde qualquer mensagem mandando a pessoa para o bot novo."""
+    deslocamento = 0
+    try:
+        tg("deleteWebhook", _token=TOKEN_ANTIGO, drop_pending_updates=False)
+        tg("setChatMenuButton", _token=TOKEN_ANTIGO, menu_button={"type": "default"})
+        tg("setMyShortDescription", _token=TOKEN_ANTIGO, short_description="Mudamos! Jogue agora no @%s" % BOT_USUARIO)
+        tg("setMyDescription", _token=TOKEN_ANTIGO, description="\U0001F43E Mudamos de casa! O jogo agora fica no @%s. Toque no link e continue sua jornada." % BOT_USUARIO)
+    except Exception as e:
+        log("bot antigo: perfil falhou", e)
+    while TOKEN_ANTIGO:
+        try:
+            for u in tg("getUpdates", _token=TOKEN_ANTIGO, limite_http=40, offset=deslocamento, timeout=25, allowed_updates=["message"]):
+                deslocamento = u["update_id"] + 1
+                m = u.get("message") or {}
+                if m.get("chat", {}).get("type") != "private":
+                    continue
+                try:
+                    tg("sendMessage", _token=TOKEN_ANTIGO, chat_id=m["chat"]["id"],
+                       text="\U0001F43E Mudamos de casa!\n\nO jogo agora se chama DOMA \u00b7 Domadores de Feras e fica no @%s.\nToque no botão abaixo para jogar." % BOT_USUARIO,
+                       reply_markup={"inline_keyboard": [[{"text": "\U0001F3AE Ir para o @%s" % BOT_USUARIO, "url": "https://t.me/%s?start=jogar" % BOT_USUARIO}]]})
+                except Exception:
+                    pass
+        except Exception as e:
+            log("bot antigo: polling", e)
+            time.sleep(10)
+
+
 def iniciar_api():
     servidor = ServidorThreads(("127.0.0.1", PORTA), Api)
     log("api ouvindo na porta", PORTA)
@@ -1979,7 +2120,9 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Defina TELEGRAM_TOKEN")
     threading.Thread(target=ajustar_sistema, daemon=True).start()
-    threading.Thread(target=lambda: (time.sleep(5), aplicar_perfil_bot()), daemon=True).start()
     preparar_banco()
+    temporada()  # deixa em cache (carteira() le dentro da trava do banco)
+    carregar_bot()
+    threading.Thread(target=lambda: (time.sleep(5), aplicar_perfil_bot()), daemon=True).start()
     threading.Thread(target=iniciar_api, daemon=True).start()
     laco_bot()
