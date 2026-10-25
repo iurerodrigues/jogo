@@ -42,7 +42,7 @@ URL_JOGO = os.environ.get("URL_JOGO", "https://iurerodrigues.github.io/jogo/")
 BANCO = os.environ.get("BANCO", "/opt/bot/dados.db")
 PORTA = int(os.environ.get("PORTA", "8080"))
 ORIGENS = {"https://iurerodrigues.github.io"}
-VERSAO = "3.0"
+VERSAO = "3.1"
 
 # Precos em estrelas. Devem bater com PACOTES_VIP do jogo.
 # Pacotes de Cristais (moeda VIP) vendidos em Telegram Stars
@@ -64,11 +64,11 @@ CATALOGO = {
 
 # Tabelas do jogo (geradas pelo build a partir de 1_dados.js - nao editar a mao)
 # <<TABELAS_JOGO>>
-TABELAS = json.loads(r'''{"itens":{"esfera":50,"superEsfera":200,"ultraEsfera":600,"pocao":60,"superPocao":180,"antidoto":120,"pedraIgnea":3000,"pedraAbissal":3000,"pedraTrovao":3000,"pedraVerdejante":3000,"pedraLunar":3500,"pedraEterna":2000,"fitaLacos":4000,"garraAfiada":2500,"escamaDura":2500,"penaVeloz":2500,"amuletoVital":2500,"orbeArcano":2500,"veuProtetor":2500,"frutaVital":400,"folhaRegen":4000,"talismaXP":5000,"compartilhadorXP":15000,"lenteFoco":3500,"faixaElemental":4500,"tonicoVital":1000,"tonicoForca":1000,"tonicoGuarda":1000,"tonicoAgil":1000,"tonicoMente":1000,"tonicoEspirito":1000,"ervaReset":1500,"mentaNatureza":6000,"cristalPerfeito":15000,"doceRaro":1200,"incenso":1500},"roupas":{"jaqueta":{"preco":2000,"requer":null},"lenco":{"preco":2500,"requer":null},"chapeu":{"preco":3000,"requer":null},"capa":{"preco":4500,"requer":null},"capuz":{"preco":6000,"requer":null},"armadura":{"preco":9000,"requer":null},"campeao":{"preco":20000,"requer":"campeao"}},"ginasios":[{"premio":800,"qtd":3},{"premio":1200,"qtd":3},{"premio":1700,"qtd":3},{"premio":2200,"qtd":3},{"premio":2800,"qtd":3},{"premio":3500,"qtd":3},{"premio":4200,"qtd":3},{"premio":5000,"qtd":3}],"liga":[{"premio":6000,"qtd":4},{"premio":7000,"qtd":4},{"premio":8000,"qtd":4},{"premio":15000,"qtd":5}],"missoes":{"vitorias":{"alvos":[5,8,12],"por":120,"longo":false},"capturas":{"alvos":[2,3,5],"por":200,"longo":false},"treinadores":{"alvos":[1,2,3],"por":300,"longo":false},"exploracoes":{"alvos":[10,15,25],"por":40,"longo":false},"criticos":{"alvos":[2,4],"por":250,"longo":false},"superEficaz":{"alvos":[5,10],"por":80,"longo":false},"torreAndares":{"alvos":[3,5],"por":200,"longo":false},"evolucoes":{"alvos":[1,2],"por":600,"longo":true},"ovos":{"alvos":[1,2],"por":500,"longo":true}},"periodos":{"dia":{"qtd":3,"mult":1},"semana":{"qtd":4,"mult":6},"mes":{"qtd":5,"mult":22}},"conquistas":{"cap10":{"premio":1000,"cont":"capturas","alvo":10},"cap50":{"premio":5000,"cont":"capturas","alvo":50},"cap150":{"premio":20000,"cont":"capturas","alvo":150},"vit25":{"premio":1500,"cont":"vitorias","alvo":25},"vit100":{"premio":6000,"cont":"vitorias","alvo":100},"vit500":{"premio":30000,"cont":"vitorias","alvo":500},"raro1":{"premio":3000,"cont":"raros","alvo":1},"raro10":{"premio":15000,"cont":"raros","alvo":10},"ovo1":{"premio":1000,"cont":"ovos","alvo":1},"ovo20":{"premio":10000,"cont":"ovos","alvo":20},"evo5":{"premio":2000,"cont":"evolucoes","alvo":5},"ins8":{"premio":10000,"cont":"insignias","alvo":8},"camp":{"premio":20000,"cont":"campeao","alvo":1},"torre10":{"premio":5000,"cont":"torreRecorde","alvo":10},"torre30":{"premio":25000,"cont":"torreRecorde","alvo":30},"arena5":{"premio":5000,"cont":"arena","alvo":5},"dex30":{"premio":8000,"cont":"bestiario","alvo":30},"dexAll":{"premio":100000,"cont":"bestiario","alvo":86}}}''')
+TABELAS = json.loads(r'''{"itens":{"esfera":50,"superEsfera":200,"ultraEsfera":600,"pocao":60,"superPocao":180,"antidoto":120,"pedraIgnea":3000,"pedraAbissal":3000,"pedraTrovao":3000,"pedraVerdejante":3000,"pedraLunar":3500,"pedraEterna":2000,"fitaLacos":4000,"garraAfiada":2500,"escamaDura":2500,"penaVeloz":2500,"amuletoVital":2500,"orbeArcano":2500,"veuProtetor":2500,"frutaVital":400,"folhaRegen":4000,"talismaXP":5000,"compartilhadorXP":15000,"lenteFoco":3500,"faixaElemental":4500,"tonicoVital":1000,"tonicoForca":1000,"tonicoGuarda":1000,"tonicoAgil":1000,"tonicoMente":1000,"tonicoEspirito":1000,"ervaReset":1500,"mentaNatureza":6000,"cristalPerfeito":15000,"doceRaro":1200,"incenso":1500},"roupas":{"jaqueta":{"preco":2000,"requer":null},"lenco":{"preco":2500,"requer":null},"chapeu":{"preco":3000,"requer":null},"capa":{"preco":4500,"requer":null},"capuz":{"preco":6000,"requer":null},"armadura":{"preco":9000,"requer":null},"campeao":{"preco":20000,"requer":"campeao"}},"ginasios":[{"premio":800,"qtd":3},{"premio":1200,"qtd":3},{"premio":1700,"qtd":3},{"premio":2200,"qtd":3},{"premio":2800,"qtd":3},{"premio":3500,"qtd":3},{"premio":4200,"qtd":3},{"premio":5000,"qtd":3}],"liga":[{"premio":6000,"qtd":4},{"premio":7000,"qtd":4},{"premio":8000,"qtd":4},{"premio":15000,"qtd":5}],"missoes":{"vitorias":{"alvos":[5,8,12],"por":120,"longo":false},"capturas":{"alvos":[2,3,5],"por":200,"longo":false},"treinadores":{"alvos":[1,2,3],"por":300,"longo":false},"exploracoes":{"alvos":[10,15,25],"por":40,"longo":false},"criticos":{"alvos":[2,4],"por":250,"longo":false},"superEficaz":{"alvos":[5,10],"por":80,"longo":false},"torreAndares":{"alvos":[3,5],"por":200,"longo":false},"evolucoes":{"alvos":[1,2],"por":600,"longo":true},"ovos":{"alvos":[1,2],"por":500,"longo":true}},"periodos":{"dia":{"qtd":3,"mult":1},"semana":{"qtd":4,"mult":6},"mes":{"qtd":5,"mult":22}},"conquistas":{"cap10":{"premio":1000,"cont":"capturas","alvo":10},"cap50":{"premio":5000,"cont":"capturas","alvo":50},"cap150":{"premio":20000,"cont":"capturas","alvo":150},"vit25":{"premio":1500,"cont":"vitorias","alvo":25},"vit100":{"premio":6000,"cont":"vitorias","alvo":100},"vit500":{"premio":30000,"cont":"vitorias","alvo":500},"raro1":{"premio":3000,"cont":"raros","alvo":1},"raro10":{"premio":15000,"cont":"raros","alvo":10},"ovo1":{"premio":1000,"cont":"ovos","alvo":1},"ovo20":{"premio":10000,"cont":"ovos","alvo":20},"evo5":{"premio":2000,"cont":"evolucoes","alvo":5},"ins8":{"premio":10000,"cont":"insignias","alvo":8},"camp":{"premio":20000,"cont":"campeao","alvo":1},"torre10":{"premio":5000,"cont":"torreRecorde","alvo":10},"torre30":{"premio":25000,"cont":"torreRecorde","alvo":30},"arena5":{"premio":5000,"cont":"arena","alvo":5},"dex30":{"premio":8000,"cont":"bestiario","alvo":30},"dexAll":{"premio":100000,"cont":"bestiario","alvo":98}}}''')
 # <</TABELAS_JOGO>>
 
 # Trocas entre jogadores
-ESPECIES_TROCAVEIS = set(["cinzor", "brasador", "infernor", "verdrax", "espinhador", "silvagor", "hidrax", "maregor", "leviator", "rasgor", "dentrax", "corvax", "gralhador", "falcorei", "lobrax", "lobrasa", "lobomar", "lobovolt", "lobosilva", "lobumbra", "vinhax", "constritor", "esporax", "micotar", "piranox", "tubarax", "krakel", "krakengor", "voltrix", "voltragon", "amperon", "tesloran", "gigavolt", "magmor", "caldeirax", "granor", "basaltor", "montanhor", "cascor", "cascalhao", "peconhar", "viperax", "basiliscor", "lodrax", "pestilar", "umbrax", "noctifer", "sombral", "eclipsor", "fagulhor", "pirotitan", "toupax", "escavor", "estalix", "trovoave", "ostrax", "perlador", "sapux", "coaxor", "morcelix", "vampirax", "lagartix", "salamandror", "geadax", "nevrak", "glaciaur", "criostal", "criogor", "brisax", "ventorax", "furacor", "zefiron", "ciclonar", "punhor", "golpeador", "brutamor", "gingar", "mestrax"])
+ESPECIES_TROCAVEIS = set(["cinzor", "brasador", "infernor", "verdrax", "espinhador", "silvagor", "hidrax", "maregor", "leviator", "rasgor", "dentrax", "corvax", "gralhador", "falcorei", "lobrax", "lobrasa", "lobomar", "lobovolt", "lobosilva", "lobumbra", "vinhax", "constritor", "esporax", "micotar", "piranox", "tubarax", "krakel", "krakengor", "voltrix", "voltragon", "amperon", "tesloran", "gigavolt", "magmor", "caldeirax", "granor", "basaltor", "montanhor", "cascor", "cascalhao", "peconhar", "viperax", "basiliscor", "lodrax", "pestilar", "umbrax", "noctifer", "sombral", "eclipsor", "fagulhor", "pirotitan", "toupax", "escavor", "estalix", "trovoave", "ostrax", "perlador", "sapux", "coaxor", "morcelix", "vampirax", "lagartix", "salamandror", "geadax", "nevrak", "glaciaur", "criostal", "criogor", "brisax", "ventorax", "furacor", "zefiron", "ciclonar", "punhor", "golpeador", "brutamor", "gingar", "mestrax", "brasito", "magmator", "vulcanis", "brotox", "lianox", "mandragor", "sparkull", "nimbux", "tormentor", "nereid", "sirenox", "abissalor"])
 TAXA_TROCA = 0.10           # 10% do valor fica com o mercado (tira moedas de circulação)
 TROCA_VALIDADE = 24 * 3600  # oferta vence em 24 h
 MAX_OFERTAS_ABERTAS = 3
@@ -284,7 +284,7 @@ def _int(v, minimo, maximo):
 def salvar_ranking(usuario, dados):
     apelido = re.sub(r"[^\w .-]", "", re.sub(r"<[^>]*>", "", str(dados.get("nome") or "")), flags=re.UNICODE).strip()[:16]
     nome = apelido if len(apelido) >= 3 else (usuario.get("first_name") or "Domador")[:24]
-    nivel = _int(dados.get("nivel"), 1, 100)
+    nivel = _int(dados.get("nivel"), 1, 9999)
     insignias = _int(dados.get("insignias"), 0, 8)
     bestiario = _int(dados.get("bestiario"), 0, 500)
     torre = _int(dados.get("torre"), 0, 10000)
@@ -324,7 +324,7 @@ def validar_fera(f):
     esp, lv, xp, hp, var, iv, ev, nat, golpes = f[:9]
     if esp not in ESPECIES_TROCAVEIS:
         raise ValueError("essa fera nao pode ser trocada")
-    if not (isinstance(lv, int) and 1 <= lv <= 100) or not isinstance(xp, int) or xp < 0:
+    if not (isinstance(lv, int) and 1 <= lv <= 9999) or not isinstance(xp, int) or xp < 0:
         raise ValueError("nivel invalido")
     if var not in ("", "s", "b"):
         raise ValueError("variante invalida")
@@ -504,7 +504,7 @@ INTERVALO_ABATE = 2.5                # segundos minimos entre duas feras derrota
 MAX_LENDARIOS_DIA = 3
 MAX_LIBERTAR_DIA = 30
 MAX_ARENA_DIA = 15
-MARCOS_NIVEL = list(range(10, 101, 10))  # Level 10, 20, ... 100 -> 1 Cristal cada
+MARCOS_NIVEL = list(range(10, 10001, 10))  # a cada 10 Levels do treinador -> 1 Cristal (sem fim)
 
 
 def dia_br(desloc=0):
@@ -526,13 +526,13 @@ def chave_periodo_srv(periodo):
 
 
 def nivel_tr(xp):
-    return min(100, int((max(0, xp) / XP_TREINADOR) ** 0.5) + 1)
+    return min(9999, int((max(0, xp) / XP_TREINADOR) ** 0.5) + 1)
 
 
 def limite_nivel(nv):
     base = regra_jogo("comandoBase", 8, 1, 100)
     passo = regra_jogo("comandoPorNivel", 4, 0.5, 50)
-    return min(100, int(base + passo * nv))
+    return min(9999, int(base + passo * nv))
 
 
 def preparar_carteira(con):
@@ -637,7 +637,7 @@ def moedas_acao(usuario, dados):
     with _trava_banco, banco() as con:
         l = carteira(con, uid, dados.get("local") if acao == "sync" else None)
         nv = nivel_tr(l["xp"])
-        teto = min(100, limite_nivel(nv) + 6)
+        teto = min(9999, limite_nivel(nv) + 6)
         xp_antes = l["xp"]
 
         if acao == "sync":
@@ -1088,7 +1088,7 @@ class Api(BaseHTTPRequestHandler):
         if not usuario:
             return self._json(401, {"ok": False, "erro": "nao autorizado"})
         uid = usuario["id"]
-        if not limitar_taxa(uid, 90):
+        if not limitar_taxa(uid, 150):
             return self._json(429, {"ok": False, "erro": "muitas requisicoes"})
         try:
             if self.path.startswith("/api/moedas"):
@@ -1129,6 +1129,15 @@ class Api(BaseHTTPRequestHandler):
             if self.path.startswith("/api/admin/reivindicar"):
                 reivindicar_admin(usuario, corpo.get("codigo"))
                 return self._json(200, {"ok": True, "admin": True})
+            if self.path.startswith("/api/arena/"):
+                acao = self.path.split("/api/arena/")[1].split("?")[0]
+                fn = {"entrar": lambda: arena_entrar(usuario, corpo), "estado": lambda: arena_estado(uid, corpo), "acao": lambda: arena_acao(uid, corpo),
+                      "resultado": lambda: arena_resultado(uid, corpo), "sair": lambda: arena_sair(uid, corpo), "fantasma": lambda: arena_fantasma(uid, corpo)}.get(acao)
+                if not fn:
+                    return self._json(404, {"ok": False, "erro": "rota"})
+                r = fn()
+                r["ok"] = True
+                return self._json(200, r)
             if self.path.startswith("/api/classe"):
                 r = classe_definir(uid, corpo.get("classe"))
                 r["ok"] = True
@@ -1555,6 +1564,8 @@ def classe_definir(uid, classe):
         if classe:
             if classe not in CLASSES_VALIDAS:
                 raise ValueError("classe invalida")
+            if (not l or l["classe"] != classe) and nivel_tr(carteira(con, uid, None)["xp"]) < int(regra_jogo("classeNivel", 50, 1, 9999)):
+                raise ValueError("classe so no nivel %d" % int(regra_jogo("classeNivel", 50, 1, 9999)))
             if not l:
                 con.execute("INSERT INTO classes (uid, classe, trocas, desde) VALUES (?,?,0,?)", (uid, classe, time.time()))
             elif l["classe"] == classe:
@@ -1571,6 +1582,204 @@ def classe_definir(uid, classe):
             l = con.execute("SELECT classe, trocas FROM classes WHERE uid=?", (uid,)).fetchone()
         c = con.execute("SELECT cristais FROM saldo WHERE uid=?", (uid,)).fetchone()
     return {"classe": l["classe"] if l else "", "trocas": l["trocas"] if l else 0, "cristais": c["cristais"] if c else 0}
+
+
+
+# ----------------------------------------------------------------------------
+# ARENA ONLINE (PvP em tempo real): fila, partidas e turnos.
+# Um jogador e o "anfitriao": o jogo dele calcula cada turno e manda o
+# resultado; o outro so escolhe a acao e mostra o resultado.
+#   POST /api/arena/entrar    {time, nome, nivel} -> entra na fila / pega partida
+#   POST /api/arena/estado    {partida, turno}    -> acao do oponente / resultado
+#   POST /api/arena/acao      {partida, turno, acao}      (convidado)
+#   POST /api/arena/resultado {partida, turno, estado, vencedor} (anfitriao)
+#   POST /api/arena/sair      {}                  -> sai da fila / desiste
+#   POST /api/arena/fantasma  {nivel}             -> equipe de outro domador (fila vazia)
+# ----------------------------------------------------------------------------
+ARENA_FILA = {}
+ARENA_PARTIDAS = {}
+ARENA_USUARIO = {}
+_trava_arena = threading.Lock()
+ARENA_ESPERA_FILA = 40     # segundos parado na fila sem ser chamado = sai
+ARENA_TEMPO_ACAO = 75      # segundos para cada lado agir antes do W.O.
+
+
+def _validar_time(t):
+    if not isinstance(t, list) or not 1 <= len(t) <= 6:
+        raise ValueError("equipe invalida")
+    return [json.loads(validar_fera(f)) for f in t]
+
+
+def _arena_limpar(agora):
+    for u, f in list(ARENA_FILA.items()):
+        if not f.get("partida") and agora - f["visto"] > ARENA_ESPERA_FILA:
+            ARENA_FILA.pop(u, None)
+    for pid, p in list(ARENA_PARTIDAS.items()):
+        if agora - p["criada"] > 3600:
+            ARENA_PARTIDAS.pop(pid, None)
+            for u in (p["host"], p["guest"]):
+                if ARENA_USUARIO.get(u) == pid:
+                    ARENA_USUARIO.pop(u, None)
+
+
+def _arena_info(p, uid):
+    papel = "host" if uid == p["host"] else "guest"
+    outro = p["guest"] if papel == "host" else p["host"]
+    return {"partida": p["id"], "papel": papel, "oponente": {"nome": p["nomes"][outro], "nivel": p["niveis"][outro], "time": p["times"][outro]},
+            "meuTime": p["times"][uid]}
+
+
+def arena_entrar(usuario, dados):
+    uid = usuario["id"]
+    nome = re.sub(r"[^\w .-]", "", str(dados.get("nome") or ""), flags=re.UNICODE).strip()[:16] or (usuario.get("first_name") or "Domador")[:16]
+    nivel = _int(dados.get("nivel"), 1, 9999)
+    time_ = _validar_time(dados.get("time"))
+    agora = time.time()
+    with _trava_banco, banco() as con:
+        con.execute("CREATE TABLE IF NOT EXISTS arena_times (uid INTEGER PRIMARY KEY, nome TEXT, nivel INTEGER, time TEXT, atualizado REAL)")
+        con.execute("INSERT OR REPLACE INTO arena_times (uid, nome, nivel, time, atualizado) VALUES (?,?,?,?,?)", (uid, nome, nivel, json.dumps(time_), agora))
+    with _trava_arena:
+        _arena_limpar(agora)
+        pid = ARENA_USUARIO.get(uid)
+        if pid and pid in ARENA_PARTIDAS and not ARENA_PARTIDAS[pid]["fim"]:
+            return _arena_info(ARENA_PARTIDAS[pid], uid)
+        # procura o oponente esperando com o nivel mais parecido
+        livres = [(abs(f["nivel"] - nivel), u) for u, f in ARENA_FILA.items() if u != uid and not f.get("partida")]
+        if livres:
+            _, outro = min(livres)
+            f = ARENA_FILA.pop(outro)
+            ARENA_FILA.pop(uid, None)
+            pid = "%x%x" % (int(agora * 1000), random.getrandbits(32))
+            p = {"id": pid, "host": outro, "guest": uid, "nomes": {outro: f["nome"], uid: nome}, "niveis": {outro: f["nivel"], uid: nivel},
+                 "times": {outro: f["time"], uid: time_}, "acoes": {}, "resultados": {}, "fim": None, "premios": {},
+                 "criada": agora, "relogio": agora, "esperando": "guest"}
+            ARENA_PARTIDAS[pid] = p
+            ARENA_USUARIO[outro] = pid
+            ARENA_USUARIO[uid] = pid
+            return _arena_info(p, uid)
+        ARENA_FILA[uid] = {"nome": nome, "nivel": nivel, "time": time_, "visto": agora, "desde": ARENA_FILA.get(uid, {}).get("desde", agora)}
+        return {"aguardando": True, "naFila": len(ARENA_FILA)}
+
+
+def _arena_encerrar(p, vencedor_uid, motivo):
+    """Marca o fim (chamar com _trava_arena) e devolve quem recebe premio."""
+    if p["fim"]:
+        return None
+    p["fim"] = {"vencedor": vencedor_uid, "motivo": motivo}
+    perdedor = p["guest"] if vencedor_uid == p["host"] else p["host"]
+    return vencedor_uid, perdedor
+
+
+def _arena_pagar(p, par):
+    if not par:
+        return
+    venc, perd = par
+    niveis_perd = sum(f[1] for f in p["times"][perd])
+    with _trava_banco, banco() as con:
+        for u, valor in ((venc, 300 + niveis_perd * 8), (perd, 60)):
+            l = carteira(con, u, None)
+            if l["arena_dia"] >= MAX_ARENA_DIA * 2:
+                p["premios"][u] = 0
+                continue
+            g = _ganhar(con, l, valor)
+            con.execute("UPDATE carteira SET arena_dia=arena_dia+1%s WHERE uid=?" % (", arena_vit=arena_vit+1" if u == venc else ""), (u,))
+            p["premios"][u] = g
+
+
+def _arena_wo(p, agora):
+    """Quem demora demais para agir perde por W.O."""
+    if p["fim"] or agora - p["relogio"] <= ARENA_TEMPO_ACAO:
+        return None
+    lento = p["guest"] if p["esperando"] == "guest" else p["host"]
+    return _arena_encerrar(p, p["host"] if lento == p["guest"] else p["guest"], "tempo")
+
+
+def _arena_partida(uid, pid):
+    p = ARENA_PARTIDAS.get(str(pid or ""))
+    if not p or uid not in (p["host"], p["guest"]):
+        raise ValueError("partida inexistente")
+    return p
+
+
+def arena_estado(uid, dados):
+    turno = _int(dados.get("turno"), 0, 10000)
+    agora = time.time()
+    with _trava_arena:
+        p = _arena_partida(uid, dados.get("partida"))
+        par = _arena_wo(p, agora)
+    _arena_pagar(p, par)
+    with _trava_arena:
+        r = {"turno": turno, "fim": p["fim"], "premio": p["premios"].get(uid), "venci": bool(p["fim"] and p["fim"]["vencedor"] == uid),
+             "espera": max(0, int(ARENA_TEMPO_ACAO - (agora - p["relogio"])))}
+        if uid == p["host"]:
+            r["acao"] = p["acoes"].get(str(turno))
+        else:
+            r["resultado"] = p["resultados"].get(str(turno))
+        return r
+
+
+def arena_acao(uid, dados):
+    turno = _int(dados.get("turno"), 0, 10000)
+    acao = dados.get("acao") if isinstance(dados.get("acao"), dict) else {}
+    acao = {"tipo": str(acao.get("tipo", ""))[:12], "golpe": str(acao.get("golpe", ""))[:40], "i": _int(acao.get("i"), 0, 5)}
+    with _trava_arena:
+        p = _arena_partida(uid, dados.get("partida"))
+        if uid != p["guest"] or p["fim"]:
+            raise ValueError("acao invalida")
+        if str(turno) in p["acoes"]:
+            return {"ok": True}
+        p["acoes"][str(turno)] = acao
+        p["relogio"] = time.time()
+        p["esperando"] = "host"
+        par = None
+        if acao["tipo"] == "desistir":
+            par = _arena_encerrar(p, p["host"], "desistencia")
+    _arena_pagar(p, par)
+    return {"ok": True}
+
+
+def arena_resultado(uid, dados):
+    turno = _int(dados.get("turno"), 0, 10000)
+    est = dados.get("estado")
+    if len(json.dumps(est)) > 12000:
+        raise ValueError("estado grande demais")
+    venc = str(dados.get("vencedor") or "")
+    with _trava_arena:
+        p = _arena_partida(uid, dados.get("partida"))
+        if uid != p["host"]:
+            raise ValueError("so o anfitriao")
+        p["resultados"][str(turno)] = est
+        p["relogio"] = time.time()
+        p["esperando"] = "guest"
+        par = None
+        if venc in ("host", "guest"):
+            par = _arena_encerrar(p, p["host"] if venc == "host" else p["guest"], "batalha")
+    _arena_pagar(p, par)
+    return {"ok": True, "premio": p["premios"].get(uid)}
+
+
+def arena_sair(uid, dados):
+    with _trava_arena:
+        ARENA_FILA.pop(uid, None)
+        pid = ARENA_USUARIO.pop(uid, None)
+        p = ARENA_PARTIDAS.get(pid) if pid else None
+        par = None
+        if p and not p["fim"]:
+            par = _arena_encerrar(p, p["guest"] if uid == p["host"] else p["host"], "desistencia")
+    if p:
+        _arena_pagar(p, par)
+    return {"ok": True}
+
+
+def arena_fantasma(uid, dados):
+    nivel = _int(dados.get("nivel"), 1, 9999)
+    with _trava_banco, banco() as con:
+        con.execute("CREATE TABLE IF NOT EXISTS arena_times (uid INTEGER PRIMARY KEY, nome TEXT, nivel INTEGER, time TEXT, atualizado REAL)")
+        linhas = con.execute("SELECT nome, nivel, time FROM arena_times WHERE uid<>? ORDER BY ABS(nivel-?) ASC, atualizado DESC LIMIT 8", (uid, nivel)).fetchall()
+    if not linhas:
+        return {"time": None}
+    l = random.choice(linhas)
+    return {"nome": l["nome"], "nivel": l["nivel"], "time": json.loads(l["time"])}
 
 
 def iniciar_api():
