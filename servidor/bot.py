@@ -64,6 +64,8 @@ MARCA = {
     "comunidade": os.environ.get("URL_COMUNIDADE", "https://t.me/domacomunidade"),
     "canal": os.environ.get("URL_CANAL", "https://t.me/domanovidades"),
     "canal_id": os.environ.get("CANAL_ID", "@domanovidades"),
+    "grupo_id": os.environ.get("GRUPO_ID", "@domacomunidade"),
+    "sugestoes": "https://t.me/domasugestoes",
 }
 COMANDOS_BOT = [
     {"command": "jogar", "description": "\U0001F3AE Abrir o jogo"},
@@ -76,7 +78,7 @@ COMANDOS_BOT = [
 BANCO = os.environ.get("BANCO", "/opt/bot/dados.db")
 PORTA = int(os.environ.get("PORTA", "8080"))
 ORIGENS = {"https://iurerodrigues.github.io"}
-VERSAO = "3.7"
+VERSAO = "3.8"
 
 # Precos em estrelas. Devem bater com PACOTES_VIP do jogo.
 # Pacotes de Cristais (moeda VIP) vendidos em Telegram Stars
@@ -216,6 +218,8 @@ def teclado_jogar(grupo=False):
         extra.append({"text": "\U0001F465 Comunidade", "url": MARCA["comunidade"]})
     if MARCA["canal"]:
         extra.append({"text": "\U0001F4E3 Novidades", "url": MARCA["canal"]})
+    if MARCA.get("sugestoes"):
+        extra.append({"text": "\U0001F4A1 Sugest\u00f5es", "url": MARCA["sugestoes"]})
     if extra:
         linhas.append(extra)
     return {"inline_keyboard": linhas}
@@ -1619,6 +1623,10 @@ class Api(BaseHTTPRequestHandler):
                 r = fn()
                 r["ok"] = True
                 return self._json(200, r)
+            if self.path.startswith("/api/evento"):
+                r = evento_jogo(usuario, corpo)
+                r["ok"] = True
+                return self._json(200, r)
             if self.path.startswith("/api/classe"):
                 r = classe_definir(uid, corpo.get("classe"))
                 r["ok"] = True
@@ -2345,6 +2353,66 @@ def anunciar_canal(texto):
            reply_markup={"inline_keyboard": [[{"text": "\U0001F3AE Jogar DOMA", "url": "https://t.me/%s?start=jogar" % BOT_USUARIO}]]})
     except Exception as e:
         log("canal falhou", e)
+
+
+# --- avisos automaticos no grupo da comunidade ---
+def anunciar_grupo(texto):
+    if not MARCA.get("grupo_id"):
+        return
+    try:
+        tg("sendMessage", chat_id=MARCA["grupo_id"], text=texto, disable_web_page_preview=True,
+           reply_markup={"inline_keyboard": [[{"text": "\U0001F3AE Jogar DOMA", "url": "https://t.me/%s?start=jogar" % BOT_USUARIO}]]})
+    except Exception as e:
+        log("grupo falhou", e)
+
+
+def _limpar_nome(n):
+    n = re.sub(r"[^\w .\-]", "", str(n or ""), flags=re.UNICODE).strip()
+    return n[:16] or "Um domador"
+
+
+EVENTOS_MAX_DIA = 6
+
+
+def evento_jogo(usuario, dados):
+    """O jogo avisa algo especial; o servidor filtra e posta no grupo."""
+    uid = usuario["id"]
+    tipo = str(dados.get("tipo", ""))
+    nome = _limpar_nome(dados.get("nome") or usuario.get("first_name"))
+    esp = str(dados.get("especie", ""))[:30]
+    nome_fera = str(dados.get("fera", ""))[:24]
+    with _trava_banco, banco() as con:
+        con.execute("CREATE TABLE IF NOT EXISTS eventos (uid INTEGER, tipo TEXT, chave TEXT, dia TEXT, criado REAL, PRIMARY KEY (uid, tipo, chave))")
+        if tipo == "novo":
+            chave = "novo"
+        elif tipo in ("brilhante", "sombrio", "lendario", "campeao"):
+            chave = tipo + ":" + esp + ":" + str(int(time.time()))
+            n = con.execute("SELECT COUNT(*) FROM eventos WHERE uid=? AND dia=?", (uid, dia_br())).fetchone()[0]
+            if n >= EVENTOS_MAX_DIA:
+                return {}
+        else:
+            raise ValueError("evento invalido")
+        try:
+            con.execute("INSERT INTO eventos (uid, tipo, chave, dia, criado) VALUES (?,?,?,?,?)", (uid, tipo, chave, dia_br(), time.time()))
+        except sqlite3.IntegrityError:
+            return {}
+        try:
+            total = max(con.execute("SELECT COUNT(*) FROM carteira").fetchone()[0], con.execute("SELECT COUNT(*) FROM eventos WHERE tipo='novo'").fetchone()[0])
+        except sqlite3.Error:
+            total = 1
+    if tipo == "novo":
+        txt = ("\U0001F44B Boas-vindas, %s!\nMais um domador chegou a Fer\u00e1lia%s. J\u00e1 somos %d domadores!\n\n"
+               "D\u00favidas e conversa: aqui no grupo \u00b7 Ideias e bugs: @domasugestoes") % (nome, (" com " + nome_fera + " como parceiro") if nome_fera else "", total)
+    elif tipo == "brilhante":
+        txt = "\u2728 BRILHANTE! %s encontrou e capturou um %s Brilhante! S\u00f3 1 em cada 10.000 feras \u00e9 assim." % (nome, nome_fera or "fera")
+    elif tipo == "sombrio":
+        txt = "\U0001F311 SOMBRIA! %s capturou um %s Sombrio, uma fera rar\u00edssima das sombras!" % (nome, nome_fera or "fera")
+    elif tipo == "lendario":
+        txt = "\U0001F451 LEND\u00c1RIO! %s domou o Primordial %s!" % (nome, nome_fera or "")
+    else:
+        txt = "\U0001F3C6 NOVO CAMPE\u00c3O! %s venceu a Liga de Fer\u00e1lia! Parab\u00e9ns, Campe\u00e3o!" % nome
+    threading.Thread(target=anunciar_grupo, args=(txt,), daemon=True).start()
+    return {}
 
 
 # --- convites: quem convida ganha Cristais quando o amigo chega ao Lv 10 ---
