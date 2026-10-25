@@ -61,9 +61,9 @@ MARCA = {
                   "\U0001F30C Mapas sem fim e sem n\u00edvel m\u00e1ximo\n\n"
                   "Toque em JOGAR e comece sua jornada!"),
     "foto": "https://iurerodrigues.github.io/jogo/marca/doma_logo.png",
-    "comunidade": os.environ.get("URL_COMUNIDADE", ""),
-    "canal": os.environ.get("URL_CANAL", ""),
-    "canal_id": os.environ.get("CANAL_ID", ""),
+    "comunidade": os.environ.get("URL_COMUNIDADE", "https://t.me/domacomunidade"),
+    "canal": os.environ.get("URL_CANAL", "https://t.me/domanovidades"),
+    "canal_id": os.environ.get("CANAL_ID", "@domanovidades"),
 }
 COMANDOS_BOT = [
     {"command": "jogar", "description": "\U0001F3AE Abrir o jogo"},
@@ -76,7 +76,7 @@ COMANDOS_BOT = [
 BANCO = os.environ.get("BANCO", "/opt/bot/dados.db")
 PORTA = int(os.environ.get("PORTA", "8080"))
 ORIGENS = {"https://iurerodrigues.github.io"}
-VERSAO = "3.3"
+VERSAO = "3.4"
 
 # Precos em estrelas. Devem bater com PACOTES_VIP do jogo.
 # Pacotes de Cristais (moeda VIP) vendidos em Telegram Stars
@@ -864,13 +864,16 @@ def moedas_acao(usuario, dados):
 
         l = con.execute("SELECT * FROM carteira WHERE uid=?", (uid,)).fetchone()
         _marcos(con, uid, xp_antes, l["xp"], cristais_ganhos)
+        convidou = pagar_convites(con, uid, nivel_tr(l["xp"]))
         resp = {"moedas": l["moedas"], "xp": l["xp"], "nivel": nivel_tr(l["xp"]), "ganho": ganho,
                 "torre": l["torre"], "cristais": ver_saldo_con(con, uid)}
         if cristais_ganhos:
             resp["cristaisGanhos"] = cristais_ganhos
         if aviso:
             resp["aviso"] = aviso
-        return resp
+    if convidou:
+        threading.Thread(target=_avisar_convite, args=(convidou, uid), daemon=True).start()
+    return resp
 
 
 # ----------------------------------------------------------------------------
@@ -1994,6 +1997,15 @@ def registrar_convite(novo_uid, codigo):
         if ja:
             return  # so vale para jogador novo
         con.execute("INSERT OR IGNORE INTO convites (uid, por, criado) VALUES (?,?,?)", (novo_uid, quem, time.time()))
+
+
+def _avisar_convite(quem, novo):
+    for chat, txt in ((quem, "\U0001F381 Um amigo que voc\u00ea convidou chegou ao Lv %d! Voc\u00ea ganhou \U0001F48E %d Cristais." % (CONVITE_NIVEL, CONVITE_CRISTAIS)),
+                      (novo, "\U0001F381 Voc\u00ea chegou ao Lv %d! Por ter vindo por convite, ganhou \U0001F48E %d Cristais." % (CONVITE_NIVEL, CONVITE_CRISTAIS))):
+        try:
+            enviar(chat, txt, teclado_jogar())
+        except Exception:
+            pass
 
 
 def pagar_convites(con, uid, nv):
