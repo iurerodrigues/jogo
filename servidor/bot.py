@@ -39,10 +39,42 @@ class ServidorThreads(ThreadingMixIn, HTTPServer):
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 URL_JOGO = os.environ.get("URL_JOGO", "https://iurerodrigues.github.io/jogo/")
+BOT_USUARIO = os.environ.get("BOT_USUARIO", "TPPCrpgbot")
+
+# ---------------------------------------------------------------------------
+# Marca do jogo: DOMA (DOmadores de Monstros Ancestrais) - Domadores de Feras
+# O servidor aplica nome, descricao, comandos, botao de menu e foto do bot
+# sozinho quando PERFIL_VERSAO muda.
+# ---------------------------------------------------------------------------
+PERFIL_VERSAO = "doma-1"
+MARCA = {
+    "nome": "DOMA \u00b7 Domadores de Feras",
+    "curta": "\U0001F43E Dome feras, ven\u00e7a gin\u00e1sios e desperte os Primordiais. RPG de monstros direto no Telegram!",
+    "descricao": ("\U0001F43E DOMA \u00b7 Domadores de Feras\n"
+                  "Dome. Evolua. Desperte os Primordiais.\n\n"
+                  "\u2694\ufe0f Capture e treine mais de 100 feras\n"
+                  "\U0001F3C5 Ven\u00e7a 8 gin\u00e1sios e a Liga de Fer\u00e1lia\n"
+                  "\U0001F310 Duelos online em tempo real\n"
+                  "\U0001F479 Primordial semanal contra todo o servidor\n"
+                  "\U0001F30C Mapas sem fim e sem n\u00edvel m\u00e1ximo\n\n"
+                  "Toque em JOGAR e comece sua jornada!"),
+    "foto": "https://iurerodrigues.github.io/jogo/marca/doma_logo.png",
+    "comunidade": os.environ.get("URL_COMUNIDADE", ""),
+    "canal": os.environ.get("URL_CANAL", ""),
+    "canal_id": os.environ.get("CANAL_ID", ""),
+}
+COMANDOS_BOT = [
+    {"command": "jogar", "description": "\U0001F3AE Abrir o jogo"},
+    {"command": "primordial", "description": "\U0001F479 Primordial da semana"},
+    {"command": "ranking", "description": "\U0001F3C6 Melhores domadores"},
+    {"command": "comunidade", "description": "\U0001F465 Grupo e canal oficiais"},
+    {"command": "convidar", "description": "\U0001F381 Convide amigos e ganhe Cristais"},
+    {"command": "ajuda", "description": "\u2753 Como jogar"},
+]
 BANCO = os.environ.get("BANCO", "/opt/bot/dados.db")
 PORTA = int(os.environ.get("PORTA", "8080"))
 ORIGENS = {"https://iurerodrigues.github.io"}
-VERSAO = "3.1"
+VERSAO = "3.2"
 
 # Precos em estrelas. Devem bater com PACOTES_VIP do jogo.
 # Pacotes de Cristais (moeda VIP) vendidos em Telegram Stars
@@ -173,8 +205,18 @@ def tg(metodo, limite_http=60, **params):
     return resp.get("result")
 
 
-def teclado_jogar():
-    return {"inline_keyboard": [[{"text": "\U0001F3AE Jogar Domadores de Feras", "web_app": {"url": URL_JOGO}}]]}
+def teclado_jogar(grupo=False):
+    # em grupos o Telegram nao aceita botao web_app: o botao leva ao chat privado do bot
+    jogar = {"text": "\U0001F3AE Jogar DOMA", "url": "https://t.me/%s?start=jogar" % BOT_USUARIO} if grupo else {"text": "\U0001F3AE Jogar DOMA", "web_app": {"url": URL_JOGO}}
+    linhas = [[jogar]]
+    extra = []
+    if MARCA["comunidade"]:
+        extra.append({"text": "\U0001F465 Comunidade", "url": MARCA["comunidade"]})
+    if MARCA["canal"]:
+        extra.append({"text": "\U0001F4E3 Novidades", "url": MARCA["canal"]})
+    if extra:
+        linhas.append(extra)
+    return {"inline_keyboard": linhas}
 
 
 def enviar(chat_id, texto, teclado=None):
@@ -947,23 +989,52 @@ def tratar_mensagem(msg):
         return
     texto = (msg.get("text") or "").strip()
     nome = usuario.get("first_name") or "Domador"
+    grupo = msg["chat"].get("type") in ("group", "supergroup", "channel")
+    texto = re.sub(r"@%s\b" % re.escape(BOT_USUARIO), "", texto, flags=re.I)
+    if grupo and not texto.startswith("/"):
+        return  # no grupo o bot so responde a comandos
+    if texto.startswith("/start") and "ref_" in texto:
+        registrar_convite(usuario.get("id"), texto.split(" ", 1)[-1].strip())
     if texto.startswith("/start") or texto.startswith("/jogar"):
         enviar(chat,
-               "Bem-vindo a Ferália, %s!\n\n"
-               "Capture feras, vença os 8 ginásios, desafie a Liga e encontre os Primordiais.\n\n"
-               "Toque no botão abaixo para começar." % nome, teclado_jogar())
+               "\U0001F43E Bem-vindo a Ferália, %s!\n\n"
+               "DOMA \u00b7 Domadores de Feras\nDome. Evolua. Desperte os Primordiais.\n\n"
+               "\u2694\ufe0f Capture e treine feras\n\U0001F3C5 Vença os 8 ginásios e a Liga\n\U0001F310 Duele com outros domadores em tempo real\n"
+               "\U0001F479 Enfrente o Primordial da semana com todo o servidor\n\n"
+               "Toque em JOGAR para começar!" % nome, teclado_jogar(grupo))
+    elif texto.startswith("/primordial"):
+        try:
+            b = boss_info(0)
+            pct = int(b["hp"] * 100 / max(1, b["hpTotal"]))
+            top = b.get("top") or []
+            linhas = "\n".join("%s %s - %s" % (["\U0001F947", "\U0001F948", "\U0001F949"][i], t["nome"], format(t["dano"], ",").replace(",", ".")) for i, t in enumerate(top[:3]))
+            enviar(chat, "\U0001F479 Primordial da semana: %s\n\u2764\ufe0f Vida: %d%%\n\U0001F465 Domadores na luta: %d\n\n%s\n\nTodo mundo que causar dano ganha prêmio na segunda-feira!" %
+                   (b["especie"].capitalize(), pct, b["participantes"], linhas or "Ninguém atacou ainda. Seja o primeiro!"), teclado_jogar(grupo))
+        except Exception:
+            enviar(chat, "\U0001F479 O Primordial desperta toda segunda-feira. Abra o jogo para lutar!", teclado_jogar(grupo))
+    elif texto.startswith("/comunidade"):
+        if MARCA["comunidade"] or MARCA["canal"]:
+            enviar(chat, "\U0001F465 Junte-se aos domadores de Ferália!\n\nNo grupo: dicas, trocas, duelos e ajuda.\nNo canal: novidades, eventos e o Primordial da semana.", teclado_jogar(grupo))
+        else:
+            enviar(chat, "A comunidade oficial está chegando! Fique de olho.", teclado_jogar(grupo))
+    elif texto.startswith("/convidar"):
+        link = "https://t.me/%s?start=ref_%d" % (BOT_USUARIO, usuario.get("id", 0))
+        enviar(chat, "\U0001F381 Convide seus amigos para o DOMA!\n\nQuando o amigo chegar ao Lv %d de treinador, vocês DOIS ganham \U0001F48E %d Cristais.\n\nSeu link de convite:\n%s" % (CONVITE_NIVEL, CONVITE_CRISTAIS, link),
+               {"inline_keyboard": [[{"text": "\U0001F4E4 Enviar convite", "url": "https://t.me/share/url?url=%s&text=%s" % (urllib.parse.quote(link), urllib.parse.quote("Bora DOMA! \U0001F43E Um RPG de feras direto no Telegram. Joga comigo:"))}]]})
     elif texto.startswith("/ranking"):
         top = top_ranking(10)
         if not top:
-            enviar(chat, "O ranking ainda está vazio. Seja o primeiro!", teclado_jogar())
+            enviar(chat, "O ranking ainda está vazio. Seja o primeiro!", teclado_jogar(grupo))
             return
         medalhas = ["\U0001F947", "\U0001F948", "\U0001F949"]
         linhas = ["%s %s - %d pts" % (medalhas[i] if i < 3 else "%d." % (i + 1), r["nome"], r["pontos"]) for i, r in enumerate(top)]
-        enviar(chat, "\U0001F3C6 Top 10 Domadores de Ferália\n\n" + "\n".join(linhas), teclado_jogar())
+        enviar(chat, "\U0001F3C6 Top 10 Domadores de Ferália\n\n" + "\n".join(linhas), teclado_jogar(grupo))
     elif texto.startswith("/ajuda"):
-        enviar(chat, "/jogar - abrir o jogo\n/ranking - os melhores domadores\n/ajuda - esta mensagem\n\n"
-                     "Seu progresso fica salvo na sua conta do Telegram.", teclado_jogar())
-    else:
+        enviar(chat, "\u2753 Como jogar DOMA\n\n"
+                     "/jogar - abrir o jogo\n/primordial - o boss da semana\n/ranking - os melhores domadores\n/comunidade - grupo e canal oficiais\n/convidar - ganhe Cristais convidando amigos\n\n"
+                     "Dentro do jogo, o Guia (\U0001F4D8) explica tudo: tipos, IVs, classes, Ninho, Arena e Confins.\n"
+                     "Seu progresso fica salvo na sua conta do Telegram.", teclado_jogar(grupo))
+    elif not grupo:
         enviar(chat, "Toque no botão para jogar!", teclado_jogar())
 
 
@@ -1782,6 +1853,122 @@ def arena_fantasma(uid, dados):
     return {"nome": l["nome"], "nivel": l["nivel"], "time": json.loads(l["time"])}
 
 
+def _kv(con):
+    con.execute("CREATE TABLE IF NOT EXISTS kv (chave TEXT PRIMARY KEY, valor TEXT)")
+
+
+def kv_ler(chave, padrao=""):
+    with _trava_banco, banco() as con:
+        _kv(con)
+        l = con.execute("SELECT valor FROM kv WHERE chave=?", (chave,)).fetchone()
+    return l["valor"] if l else padrao
+
+
+def kv_gravar(chave, valor):
+    with _trava_banco, banco() as con:
+        _kv(con)
+        con.execute("INSERT OR REPLACE INTO kv (chave, valor) VALUES (?,?)", (chave, str(valor)))
+
+
+def carregar_marca():
+    """Links da comunidade/canal podem ser gravados no banco (sem precisar de deploy)."""
+    for k in ("comunidade", "canal", "canal_id"):
+        v = kv_ler("marca_" + k, "")
+        if v:
+            MARCA[k] = v
+
+
+def tg_multipart(metodo, campos, arquivo_campo, nome_arquivo, conteudo, tipo="image/png"):
+    limite = "----doma%x" % random.getrandbits(64)
+    partes = []
+    for k, v in campos.items():
+        partes.append(("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n%s\r\n" % (limite, k, v)).encode("utf-8"))
+    partes.append(("--%s\r\nContent-Disposition: form-data; name=\"%s\"; filename=\"%s\"\r\nContent-Type: %s\r\n\r\n" % (limite, arquivo_campo, nome_arquivo, tipo)).encode("utf-8") + conteudo + b"\r\n")
+    partes.append(("--%s--\r\n" % limite).encode("utf-8"))
+    req = urllib.request.Request("https://api.telegram.org/bot%s/%s" % (TOKEN, metodo), data=b"".join(partes),
+                                 headers={"Content-Type": "multipart/form-data; boundary=%s" % limite})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        resp = json.loads(r.read().decode("utf-8"))
+    if not resp.get("ok"):
+        raise RuntimeError("Telegram: %s" % resp)
+    return resp.get("result")
+
+
+def aplicar_perfil_bot(forcar=False):
+    """Nome, descricoes, comandos, botao de menu e foto do bot (uma vez por PERFIL_VERSAO)."""
+    carregar_marca()
+    try:
+        tg("setMyCommands", commands=COMANDOS_BOT)
+        tg("setMyCommands", commands=COMANDOS_BOT, language_code="pt")
+        tg("setChatMenuButton", menu_button={"type": "web_app", "text": "\U0001F3AE Jogar", "web_app": {"url": URL_JOGO}})
+    except Exception as e:
+        log("perfil: comandos/menu falhou", e)
+    if not forcar and kv_ler("perfil_versao") == PERFIL_VERSAO:
+        return
+    for metodo, params in (("setMyName", {"name": MARCA["nome"]}), ("setMyShortDescription", {"short_description": MARCA["curta"]}),
+                           ("setMyDescription", {"description": MARCA["descricao"]})):
+        for lang in ("", "pt"):
+            try:
+                p = dict(params)
+                if lang:
+                    p["language_code"] = lang
+                tg(metodo, **p)
+            except Exception as e:
+                log("perfil:", metodo, lang, e)
+    try:
+        with urllib.request.urlopen(MARCA["foto"], timeout=30) as r:
+            foto = r.read()
+        tg_multipart("setMyProfilePhoto", {"photo": json.dumps({"type": "static", "photo": "attach://foto"})}, "foto", "doma.png", foto)
+        log("perfil: foto atualizada")
+    except Exception as e:
+        log("perfil: foto falhou", e)
+    kv_gravar("perfil_versao", PERFIL_VERSAO)
+    log("perfil do bot aplicado", PERFIL_VERSAO)
+
+
+def anunciar_canal(texto):
+    """Posta no canal oficial (se configurado e o bot for admin)."""
+    if not MARCA.get("canal_id"):
+        return
+    try:
+        tg("sendMessage", chat_id=MARCA["canal_id"], text=texto,
+           reply_markup={"inline_keyboard": [[{"text": "\U0001F3AE Jogar DOMA", "url": "https://t.me/%s?start=jogar" % BOT_USUARIO}]]})
+    except Exception as e:
+        log("canal falhou", e)
+
+
+# --- convites: quem convida ganha Cristais quando o amigo chega ao Lv 10 ---
+CONVITE_NIVEL = 10
+CONVITE_CRISTAIS = 5
+
+
+def registrar_convite(novo_uid, codigo):
+    try:
+        quem = int(str(codigo).replace("ref_", ""))
+    except ValueError:
+        return
+    if quem == novo_uid:
+        return
+    with _trava_banco, banco() as con:
+        con.execute("CREATE TABLE IF NOT EXISTS convites (uid INTEGER PRIMARY KEY, por INTEGER, pago INTEGER DEFAULT 0, criado REAL)")
+        ja = con.execute("SELECT 1 FROM carteira WHERE uid=?", (novo_uid,)).fetchone()
+        if ja:
+            return  # so vale para jogador novo
+        con.execute("INSERT OR IGNORE INTO convites (uid, por, criado) VALUES (?,?,?)", (novo_uid, quem, time.time()))
+
+
+def pagar_convites(con, uid, nv):
+    """Chamado no sync da carteira: paga o convite quando o convidado chega ao nivel."""
+    con.execute("CREATE TABLE IF NOT EXISTS convites (uid INTEGER PRIMARY KEY, por INTEGER, pago INTEGER DEFAULT 0, criado REAL)")
+    l = con.execute("SELECT por, pago FROM convites WHERE uid=?", (uid,)).fetchone()
+    if not l or l["pago"] or nv < CONVITE_NIVEL:
+        return None
+    con.execute("UPDATE convites SET pago=1 WHERE uid=?", (uid,))
+    creditar(con, l["por"], CONVITE_CRISTAIS)
+    creditar(con, uid, CONVITE_CRISTAIS)
+    return l["por"]
+
+
 def iniciar_api():
     servidor = ServidorThreads(("127.0.0.1", PORTA), Api)
     log("api ouvindo na porta", PORTA)
@@ -1792,6 +1979,7 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Defina TELEGRAM_TOKEN")
     threading.Thread(target=ajustar_sistema, daemon=True).start()
+    threading.Thread(target=lambda: (time.sleep(5), aplicar_perfil_bot()), daemon=True).start()
     preparar_banco()
     threading.Thread(target=iniciar_api, daemon=True).start()
     laco_bot()
