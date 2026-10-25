@@ -76,7 +76,7 @@ COMANDOS_BOT = [
 BANCO = os.environ.get("BANCO", "/opt/bot/dados.db")
 PORTA = int(os.environ.get("PORTA", "8080"))
 ORIGENS = {"https://iurerodrigues.github.io"}
-VERSAO = "3.5"
+VERSAO = "3.6"
 
 # Precos em estrelas. Devem bater com PACOTES_VIP do jogo.
 # Pacotes de Cristais (moeda VIP) vendidos em Telegram Stars
@@ -89,7 +89,7 @@ PACOTES = {
 
 # O que se compra com Cristais. Os precos ficam no servidor (o jogo so mostra).
 CATALOGO = {
-    "amuleto1": 60, "amuleto5": 240, "incenso3": 90, "ultra10": 70, "passe": 350,
+    "amuleto1": 60, "amuleto5": 240, "incenso3": 90, "ultra10": 70, "passe": 350, "visual": 80,
     "menta1": 40, "cristal": 150,
     "roupaReal": 150, "roupaObsidiana": 200, "roupaEstelar": 250, "roupaPirata": 120,
     "auraDourada": 120, "auraSombria": 120, "auraGelida": 120, "auraFlamejante": 120,
@@ -490,6 +490,173 @@ def troca_aceitar(usuario, dados):
         cart = con.execute("SELECT moedas FROM carteira WHERE uid=?", (uid,)).fetchone()
         return {"fera": json.loads(l["fera"]), "pedeTipo": l["pede_tipo"], "pedeValor": l["pede_valor"],
                 "cristais": ver_saldo_con(con, uid), "moedas": cart["moedas"] if cart else None}
+
+
+# ----------------------------------------------------------------------------
+# MERCADO entre jogadores (vitrine publica) e NPC que compra itens
+# O vendedor anuncia uma fera ou itens por um preco em Moedas. O que foi
+# anunciado fica guardado no servidor. Quem compra paga em Moedas e o vendedor
+# recebe 90% (10% de taxa). Anuncios vencem em 3 dias e voltam ao dono.
+# ----------------------------------------------------------------------------
+MERCADO_VALIDADE = 3 * 86400
+MERCADO_MAX_ANUNCIOS = 6
+ITENS_VIP_MERCADO = {"auraDourada", "auraSombria", "auraGelida", "auraFlamejante", "amuleto"}
+NPC_PAGA = 0.4                   # o NPC paga 40% do preco da loja
+NPC_TETO_DIA = 30000             # no maximo isso por dia vendendo ao NPC
+
+
+def _tabela_mercado(con):
+    con.execute("""CREATE TABLE IF NOT EXISTS mercado (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, de_uid INTEGER, de_nome TEXT, tipo TEXT, fera TEXT, item TEXT, qtd INTEGER,
+        preco INTEGER, criado INTEGER, status TEXT DEFAULT 'aberto', para_uid INTEGER, para_nome TEXT, fechado INTEGER,
+        entregue_dono INTEGER DEFAULT 0, especie TEXT, nivel INTEGER)""")
+    con.execute("CREATE TABLE IF NOT EXISTS npc_venda (uid INTEGER PRIMARY KEY, dia TEXT, total INTEGER)")
+    con.execute("UPDATE mercado SET status='expirado', fechado=? WHERE status='aberto' AND criado<?", (int(time.time()), int(time.time()) - MERCADO_VALIDADE))
+
+
+def _preco_item(item):
+    return int((TABELAS.get("itens") or {}).get(item) or 0)
+
+
+def _anuncio_publico(l, uid=None):
+    a = {"id": l["id"], "de": l["de_nome"], "tipo": l["tipo"], "preco": l["preco"], "criado": l["criado"], "status": l["status"],
+         "vence": l["criado"] + MERCADO_VALIDADE}
+    if l["tipo"] == "fera":
+        a["fera"] = json.loads(l["fera"])
+    else:
+        a["item"], a["qtd"] = l["item"], l["qtd"]
+    if uid is not None:
+        a["meu"] = l["de_uid"] == uid
+    return a
+
+
+def mercado_vender(usuario, dados):
+    uid = usuario["id"]
+    tipo = dados.get("tipo")
+    preco = _int(dados.get("preco"), 1, 10000000)
+    fera = item = None
+    qtd = 1
+    especie, nivel = "", 0
+    if tipo == "fera":
+        fera = validar_fera(dados.get("fera"))
+        f = json.loads(fera)
+        especie, nivel = f[0], f[1]
+    elif tipo == "item":
+        item = str(dados.get("item", ""))
+        qtd = _int(dados.get("qtd"), 1, 99)
+        base = _preco_item(item)
+        if not base and item not in ITENS_VIP_MERCADO:
+            raise ValueError("item invalido")
+        teto = (base * 3 if base else 50000) * qtd
+        if preco > teto:
+            raise ValueError("preco alto demais")
+    else:
+        raise ValueError("tipo invalido")
+    with _trava_banco, banco() as con:
+        _tabela_mercado(con)
+        n = con.execute("SELECT COUNT(*) FROM mercado WHERE de_uid=? AND status='aberto'", (uid,)).fetchone()[0]
+        if n >= MERCADO_MAX_ANUNCIOS:
+            raise ValueError("limite de anuncios")
+        cur = con.execute("INSERT INTO mercado (de_uid, de_nome, tipo, fera, item, qtd, preco, criado, especie, nivel) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                          (uid, nome_de(usuario, dados), tipo, fera, item, qtd, preco, int(time.time()), especie, nivel))
+        return {"id": cur.lastrowid}
+
+
+def mercado_listar(uid, dados):
+    tipo = dados.get("tipo") if dados.get("tipo") in ("fera", "item") else None
+    busca = str(dados.get("busca") or "")[:30].lower()
+    ordem = "preco ASC" if dados.get("ordem") == "barato" else "criado DESC"
+    with _trava_banco, banco() as con:
+        _tabela_mercado(con)
+        sql = "SELECT * FROM mercado WHERE status='aberto'"
+        args = []
+        if tipo:
+            sql += " AND tipo=?"
+            args.append(tipo)
+        if busca:
+            sql += " AND (especie LIKE ? OR item LIKE ?)"
+            args += ["%" + busca + "%", "%" + busca + "%"]
+        linhas = con.execute(sql + " ORDER BY " + ordem + " LIMIT 80", args).fetchall()
+    return {"anuncios": [_anuncio_publico(l, uid) for l in linhas]}
+
+
+def mercado_comprar(usuario, dados):
+    uid = usuario["id"]
+    aid = _int(dados.get("id"), 1, 10 ** 12)
+    with _trava_banco, banco() as con:
+        _tabela_mercado(con)
+        l = con.execute("SELECT * FROM mercado WHERE id=?", (aid,)).fetchone()
+        if not l or l["status"] != "aberto":
+            raise ValueError("anuncio encerrado")
+        if l["de_uid"] == uid:
+            raise ValueError("anuncio proprio")
+        carteira(con, uid)
+        carteira(con, l["de_uid"])
+        cur = con.execute("UPDATE carteira SET moedas = moedas - ? WHERE uid=? AND moedas >= ?", (l["preco"], uid, l["preco"]))
+        if cur.rowcount != 1:
+            raise ValueError("moedas insuficientes")
+        cur = con.execute("UPDATE mercado SET status='vendido', para_uid=?, para_nome=?, fechado=? WHERE id=? AND status='aberto'",
+                          (uid, nome_de(usuario, dados), int(time.time()), aid))
+        if cur.rowcount != 1:
+            raise ValueError("anuncio encerrado")
+        con.execute("UPDATE carteira SET moedas = moedas + ? WHERE uid=?", (int(l["preco"] * (1 - TAXA_TROCA)), l["de_uid"]))
+        moedas = con.execute("SELECT moedas FROM carteira WHERE uid=?", (uid,)).fetchone()["moedas"]
+    try:
+        enviar(l["de_uid"], "\U0001F6D2 Vendido no Mercado! %s comprou seu an\u00fancio e voc\u00ea recebeu \U0001F4B0 %d Moedas." % (nome_de(usuario, dados), int(l["preco"] * (1 - TAXA_TROCA))))
+    except Exception:
+        pass
+    return {"anuncio": _anuncio_publico(l), "moedas": moedas}
+
+
+def mercado_cancelar(uid, dados):
+    aid = _int(dados.get("id"), 1, 10 ** 12)
+    with _trava_banco, banco() as con:
+        _tabela_mercado(con)
+        cur = con.execute("UPDATE mercado SET status='cancelado', fechado=? WHERE id=? AND de_uid=? AND status='aberto'", (int(time.time()), aid, uid))
+        if cur.rowcount != 1:
+            raise ValueError("nao pode cancelar")
+    return {}
+
+
+def mercado_meus(uid):
+    """Anuncios do jogador + entregas (o que voltou ou foi vendido), uma vez so."""
+    with _trava_banco, banco() as con:
+        _tabela_mercado(con)
+        pend = con.execute("SELECT * FROM mercado WHERE de_uid=? AND status IN ('vendido','cancelado','expirado') AND entregue_dono=0", (uid,)).fetchall()
+        entregas = []
+        for l in pend:
+            e = _anuncio_publico(l)
+            if l["status"] == "vendido":
+                e["recebido"] = int(l["preco"] * (1 - TAXA_TROCA))
+                e["para"] = l["para_nome"]
+            entregas.append(e)
+        if pend:
+            con.executemany("UPDATE mercado SET entregue_dono=1 WHERE id=?", [(l["id"],) for l in pend])
+        abertos = con.execute("SELECT * FROM mercado WHERE de_uid=? AND status='aberto' ORDER BY criado DESC", (uid,)).fetchall()
+        cart = con.execute("SELECT moedas FROM carteira WHERE uid=?", (uid,)).fetchone()
+    return {"entregas": entregas, "abertos": [_anuncio_publico(l, uid) for l in abertos], "moedas": cart["moedas"] if cart else None}
+
+
+def npc_vender(uid, dados):
+    """O Comerciante compra itens do jogador por 40% do preco da loja (com teto diario)."""
+    item = str(dados.get("item", ""))
+    qtd = _int(dados.get("qtd"), 1, 99)
+    base = _preco_item(item)
+    if not base:
+        raise ValueError("o comerciante nao compra isso")
+    valor = int(base * NPC_PAGA) * qtd
+    hoje = dia_br()
+    with _trava_banco, banco() as con:
+        _tabela_mercado(con)
+        carteira(con, uid)
+        l = con.execute("SELECT dia, total FROM npc_venda WHERE uid=?", (uid,)).fetchone()
+        total = l["total"] if l and l["dia"] == hoje else 0
+        if total + valor > NPC_TETO_DIA:
+            raise ValueError("teto do dia")
+        con.execute("INSERT INTO npc_venda (uid, dia, total) VALUES (?,?,?) ON CONFLICT(uid) DO UPDATE SET dia=excluded.dia, total=excluded.total", (uid, hoje, total + valor))
+        con.execute("UPDATE carteira SET moedas = moedas + ? WHERE uid=?", (valor, uid))
+        moedas = con.execute("SELECT moedas FROM carteira WHERE uid=?", (uid,)).fetchone()["moedas"]
+    return {"ganho": valor, "moedas": moedas, "restante": NPC_TETO_DIA - total - valor}
 
 
 def ver_saldo_con(con, uid):
@@ -1207,6 +1374,24 @@ def limitar_taxa(chave, max_por_minuto=30):
     return _acessos[k] <= max_por_minuto
 
 
+# --- Arte do jogo (cenarios, esferas) enviada pelo gerador de pixel art ---
+ARTE_DIR = os.environ.get("ARTE_DIR", os.path.join(os.path.dirname(BANCO), "arte"))
+ARTE_CHAVE_HASH = "1c08b93f102863538ba1085a9edc540e2851dc2f7ce76f0e21c31754239a3247"
+
+
+def arte_salvar(nome, chave, dados):
+    if not hmac.compare_digest(hashlib.sha256(str(chave or "").encode()).hexdigest(), ARTE_CHAVE_HASH):
+        raise PermissionError("chave")
+    if not re.match(r"^[a-z0-9_]{2,40}$", nome or "") or not dados.startswith(b"\x89PNG") or len(dados) > 900000:
+        raise ValueError("arquivo invalido")
+    os.makedirs(ARTE_DIR, exist_ok=True)
+    tmp = os.path.join(ARTE_DIR, nome + ".tmp")
+    with open(tmp, "wb") as f:
+        f.write(dados)
+    os.replace(tmp, os.path.join(ARTE_DIR, nome + ".png"))
+    return len(dados)
+
+
 def _tentar(fn, *a):
     try:
         fn(*a)
@@ -1226,7 +1411,7 @@ class Api(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", origem)
             self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Chave")
         self.send_header("Access-Control-Max-Age", "600")
 
     def _json(self, codigo, corpo):
@@ -1267,6 +1452,27 @@ class Api(BaseHTTPRequestHandler):
         if self.path.startswith("/api/config"):
             cfg, versao = ler_config()
             return self._json(200, {"ok": True, "config": cfg, "versao": versao, "temporada": temporada(), "bot": BOT_USUARIO})
+        if self.path.startswith("/api/arte/img/"):
+            nome = self.path.split("/api/arte/img/")[1].split("?")[0]
+            caminho = os.path.join(ARTE_DIR, nome)
+            if not re.match(r"^[a-z0-9_]{2,40}\.png$", nome) or not os.path.isfile(caminho):
+                return self._json(404, {"ok": False})
+            with open(caminho, "rb") as f:
+                dados = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.send_header("Content-Length", str(len(dados)))
+            self.end_headers()
+            self.wfile.write(dados)
+            return
+        if self.path.startswith("/api/arte/lista"):
+            try:
+                nomes = sorted(x[:-4] for x in os.listdir(ARTE_DIR) if x.endswith(".png"))
+            except OSError:
+                nomes = []
+            return self._json(200, {"ok": True, "arte": nomes})
         if self.path.startswith("/pagar"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             dados = pagina_pagar((q.get("pedido") or [""])[0])
@@ -1281,8 +1487,19 @@ class Api(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             tamanho = int(self.headers.get("Content-Length", "0"))
-            if tamanho > (CONFIG_MAX + 8000 if self.path.startswith("/api/admin/config") or self.path.startswith("/api/admin/ia") else 20000):
+            if tamanho > (900000 if self.path.startswith("/api/arte/enviar") else CONFIG_MAX + 8000 if self.path.startswith("/api/admin/config") or self.path.startswith("/api/admin/ia") else 20000):
                 return self._json(413, {"ok": False, "erro": "grande demais"})
+            if self.path.startswith("/api/arte/enviar"):
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                if tamanho > 900000:
+                    return self._json(413, {"ok": False})
+                try:
+                    n = arte_salvar((q.get("nome") or [""])[0], (q.get("k") or [""])[0], self.rfile.read(tamanho))
+                    return self._json(200, {"ok": True, "bytes": n})
+                except PermissionError:
+                    return self._json(403, {"ok": False})
+                except ValueError as e:
+                    return self._json(400, {"ok": False, "erro": str(e)})
             bruto = self.rfile.read(tamanho)
             if self.path.startswith("/api/mp/aviso"):
                 return self._aviso_mp(bruto)
@@ -1373,6 +1590,16 @@ class Api(BaseHTTPRequestHandler):
                 acao = self.path.split("/api/arena/")[1].split("?")[0]
                 fn = {"entrar": lambda: arena_entrar(usuario, corpo), "estado": lambda: arena_estado(uid, corpo), "acao": lambda: arena_acao(uid, corpo),
                       "resultado": lambda: arena_resultado(uid, corpo), "sair": lambda: arena_sair(uid, corpo), "fantasma": lambda: arena_fantasma(uid, corpo)}.get(acao)
+                if not fn:
+                    return self._json(404, {"ok": False, "erro": "rota"})
+                r = fn()
+                r["ok"] = True
+                return self._json(200, r)
+            if self.path.startswith("/api/mercado/"):
+                acao = self.path.split("/api/mercado/")[1].split("?")[0]
+                fn = {"vender": lambda: mercado_vender(usuario, corpo), "listar": lambda: mercado_listar(uid, corpo),
+                      "comprar": lambda: mercado_comprar(usuario, corpo), "cancelar": lambda: mercado_cancelar(uid, corpo),
+                      "meus": lambda: mercado_meus(uid), "npc": lambda: npc_vender(uid, corpo)}.get(acao)
                 if not fn:
                     return self._json(404, {"ok": False, "erro": "rota"})
                 r = fn()
