@@ -76,7 +76,7 @@ COMANDOS_BOT = [
 BANCO = os.environ.get("BANCO", "/opt/bot/dados.db")
 PORTA = int(os.environ.get("PORTA", "8080"))
 ORIGENS = {"https://iurerodrigues.github.io"}
-VERSAO = "3.6"
+VERSAO = "3.7"
 
 # Precos em estrelas. Devem bater com PACOTES_VIP do jogo.
 # Pacotes de Cristais (moeda VIP) vendidos em Telegram Stars
@@ -872,7 +872,7 @@ def moedas_acao(usuario, dados):
             var = _int(dados.get("var"), 0, 2)
             lend = bool(dados.get("lend")) and l["lend_dia"] < MAX_LENDARIOS_DIA
             mult_var = (1, 1.5, 2)[var]
-            xp = min(_int(dados.get("xp"), 0, 100000), nivel * 36 * regra_jogo("xpFera", 1, 0.1, 10))
+            xp = min(_int(dados.get("xp"), 0, 100000), nivel * 60 * regra_jogo("xpFera", 1, 0.1, 10))
             tipo = str(dados.get("tipo", ""))
             xp = xp * regra_jogo("xpTreinador", 1, 0.1, 10)
             con.execute("UPDATE carteira SET xp=xp+?, ult_abate=? WHERE uid=?", (int(round(xp * 0.5)), agora, uid))
@@ -1392,6 +1392,17 @@ def arte_salvar(nome, chave, dados):
     return len(dados)
 
 
+# --- quem esta jogando agora (visto nos ultimos 3 minutos) ---
+ONLINE = {}
+
+
+def contar_online():
+    limite = time.time() - 180
+    for k in [k for k, v in ONLINE.items() if v < limite]:
+        ONLINE.pop(k, None)
+    return len(ONLINE)
+
+
 def _tentar(fn, *a):
     try:
         fn(*a)
@@ -1520,6 +1531,9 @@ class Api(BaseHTTPRequestHandler):
         uid = usuario["id"]
         if not limitar_taxa(uid, 150):
             return self._json(429, {"ok": False, "erro": "muitas requisicoes"})
+        ONLINE[uid] = time.time()
+        if self.path.startswith("/api/online"):
+            return self._json(200, {"ok": True, "online": contar_online()})
         if corpo.get("temporada") and str(corpo.get("temporada")) != str(temporada()):
             return self._json(409, {"ok": False, "erro": "nova temporada", "temporada": temporada()})
         try:
