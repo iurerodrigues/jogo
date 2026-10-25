@@ -76,7 +76,7 @@ COMANDOS_BOT = [
 BANCO = os.environ.get("BANCO", "/opt/bot/dados.db")
 PORTA = int(os.environ.get("PORTA", "8080"))
 ORIGENS = {"https://iurerodrigues.github.io"}
-VERSAO = "3.4"
+VERSAO = "3.5"
 
 # Precos em estrelas. Devem bater com PACOTES_VIP do jogo.
 # Pacotes de Cristais (moeda VIP) vendidos em Telegram Stars
@@ -905,6 +905,93 @@ def preparar_pedidos(con):
         referencia TEXT)""")
 
 
+# --- Mercado Pago (Checkout Pro: Pix e cartao numa pagina segura do MP) ---
+MP_API = "https://api.mercadopago.com"
+
+
+def mp_token():
+    with _trava_banco, banco() as con:
+        return _segredo(con, "mp_token")
+
+
+def mp(metodo, caminho, corpo=None, token=None):
+    req = urllib.request.Request(MP_API + caminho, method=metodo,
+                                 data=json.dumps(corpo).encode("utf-8") if corpo is not None else None,
+                                 headers={"Authorization": "Bearer " + (token or mp_token()), "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read().decode("utf-8") or "{}")
+
+
+def mp_salvar_token(uid, token):
+    if not eh_admin(uid):
+        raise PermissionError("so administrador")
+    token = str(token or "").strip()
+    if not re.match(r"^(APP_USR|TEST)-[\w-]{20,}$", token):
+        raise ValueError("chave invalida")
+    try:
+        eu = mp("GET", "/users/me", token=token)
+    except Exception:
+        raise ValueError("o Mercado Pago nao aceitou essa chave")
+    with _trava_banco, banco() as con:
+        _segredo(con, "mp_token", token)
+    log("mercado pago configurado por", uid)
+    return mp_info()
+
+
+def mp_info():
+    t = mp_token()
+    if not t:
+        return {"configurado": False}
+    try:
+        eu = mp("GET", "/users/me", token=t)
+        return {"configurado": True, "teste": t.startswith("TEST-"), "conta": eu.get("nickname") or "", "pais": eu.get("site_id") or ""}
+    except Exception:
+        return {"configurado": True, "erro": True, "teste": t.startswith("TEST-")}
+
+
+def mp_preferencia(pid, pacote_id):
+    p = PACOTES_REAIS[pacote_id]
+    volta = URL_PUBLICA + "/pagar?" + urllib.parse.urlencode({"pedido": pid})
+    r = mp("POST", "/checkout/preferences", {
+        "items": [{"id": pacote_id, "title": "DOMA \u00b7 " + p["titulo"], "quantity": 1, "currency_id": "BRL", "unit_price": p["centavos"] / 100.0}],
+        "external_reference": pid,
+        "notification_url": URL_PUBLICA + "/api/mp/aviso",
+        "back_urls": {"success": volta, "pending": volta, "failure": volta},
+        "auto_return": "approved",
+        "statement_descriptor": "DOMA FERAS",
+        "payment_methods": {"installments": 1},
+    })
+    return r.get("init_point") or r.get("sandbox_init_point")
+
+
+def mp_conferir_pagamento(pay_id):
+    """Busca o pagamento no MP (nunca confia no corpo do aviso) e credita se aprovado."""
+    pg = mp("GET", "/v1/payments/%s" % urllib.parse.quote(str(pay_id)))
+    if pg.get("status") != "approved" or pg.get("currency_id") != "BRL":
+        return False
+    p = ver_pedido(pg.get("external_reference") or "")
+    if not p:
+        return False
+    if int(round(float(pg.get("transaction_amount") or 0) * 100)) < p["centavos"]:
+        log("mp: valor menor que o pedido", pay_id)
+        return False
+    return confirmar_pedido(p["id"], "mp:%s" % pay_id)
+
+
+def mp_conferir_pedido(pid):
+    """Procura pagamentos aprovados do pedido (caso o aviso do MP nao tenha chegado)."""
+    if not mp_token():
+        return False
+    try:
+        r = mp("GET", "/v1/payments/search?" + urllib.parse.urlencode({"external_reference": pid, "status": "approved"}))
+        for pg in r.get("results") or []:
+            if mp_conferir_pagamento(pg.get("id")):
+                return True
+    except Exception as e:
+        log("mp: conferir pedido falhou", e)
+    return False
+
+
 def criar_pedido(uid, pacote_id):
     p = PACOTES_REAIS.get(pacote_id)
     if not p:
@@ -917,6 +1004,14 @@ def criar_pedido(uid, pacote_id):
         con.execute("INSERT INTO pedidos (id, uid, pacote, centavos, criado) VALUES (?,?,?,?,?)",
                     (pid, uid, pacote_id, p["centavos"], int(time.time())))
     # So o codigo do pedido vai no link: nada de dados pessoais na URL.
+    if mp_token():
+        try:
+            link = mp_preferencia(pid, pacote_id)
+            if link:
+                return {"pedido": pid, "link": link, "valor": p["centavos"]}
+        except Exception as e:
+            log("mp: preferencia falhou", e)
+            raise ValueError("pagamento indisponivel")
     base = PAGAMENTO_URL or (URL_PUBLICA + "/pagar")
     link = base + ("&" if "?" in base else "?") + urllib.parse.urlencode({"pedido": pid})
     return {"pedido": pid, "link": link, "valor": p["centavos"]}
@@ -952,6 +1047,8 @@ def pagina_pagar(pid):
     """Pagina provisoria de checkout. Quando a plataforma for escolhida, ela
     passa a criar o Pix/cartao aqui (ou PAGAMENTO_URL aponta direto para ela)."""
     p = ver_pedido(pid)
+    if p and p["status"] != "pago" and mp_conferir_pedido(p["id"]):
+        p = ver_pedido(pid)
     if not p:
         corpo = "<h1>Pedido não encontrado</h1><p>Volte ao jogo e tente de novo.</p>"
     else:
@@ -961,10 +1058,11 @@ def pagina_pagar(pid):
             corpo = "<h1>✅ Pago!</h1><p>%s já estão na sua conta. Pode voltar ao jogo.</p>" % pac["titulo"]
         else:
             corpo = ("<h1>💎 %s</h1><p class=v>%s</p><p>Pedido <b>%s</b></p>"
-                     "<div class=box>Pagamento por <b>Pix</b> ou <b>cartão de crédito</b> chegando em breve.<br>"
-                     "Nenhuma cobrança foi feita.</div>") % (pac["titulo"], valor, p["id"])
+                     "<div class=box>Ainda não recebemos a confirmação deste pagamento.<br>"
+                     "Pix costuma confirmar em segundos. Se já pagou, aguarde um pouco e atualize esta página.</div>"
+                     "<p><a href='' style='color:#f5c542'>🔄 Atualizar</a></p>") % (pac["titulo"], valor, p["id"])
     html = ("<!doctype html><html lang=pt-BR><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-            "<title>Domadores de Feras · Cristais</title><style>body{margin:0;font-family:system-ui,sans-serif;background:#14121c;color:#eee;"
+            "<title>DOMA · Cristais</title><style>body{margin:0;font-family:system-ui,sans-serif;background:#14121c;color:#eee;"
             "display:flex;min-height:100vh;align-items:center;justify-content:center;padding:16px}main{max-width:420px;text-align:center}"
             "h1{font-size:24px}.v{font-size:32px;font-weight:700;color:#f5c542}.box{background:#211d2e;border-radius:12px;padding:16px;margin-top:16px}"
             "</style></head><body><main>%s</main></body></html>") % corpo
@@ -1109,6 +1207,13 @@ def limitar_taxa(chave, max_por_minuto=30):
     return _acessos[k] <= max_por_minuto
 
 
+def _tentar(fn, *a):
+    try:
+        fn(*a)
+    except Exception as e:
+        log("falhou", getattr(fn, "__name__", "?"), e)
+
+
 class Api(BaseHTTPRequestHandler):
     server_version = "Feras/" + VERSAO
 
@@ -1132,6 +1237,22 @@ class Api(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(dados)))
         self.end_headers()
         self.wfile.write(dados)
+
+    def _aviso_mp(self, bruto):
+        """Aviso do Mercado Pago: so o id importa, o pagamento e conferido na API do MP."""
+        try:
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            try:
+                d = json.loads(bruto.decode("utf-8") or "{}")
+            except ValueError:
+                d = {}
+            tipo = d.get("type") or d.get("topic") or (q.get("type") or q.get("topic") or [""])[0]
+            pid = (d.get("data") or {}).get("id") or (q.get("data.id") or q.get("id") or [""])[0]
+            if tipo == "payment" and pid and limitar_taxa("mp", 600):
+                threading.Thread(target=lambda: _tentar(mp_conferir_pagamento, pid), daemon=True).start()
+        except Exception:
+            log("mp: aviso", traceback.format_exc())
+        return self._json(200, {"ok": True})
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -1163,6 +1284,8 @@ class Api(BaseHTTPRequestHandler):
             if tamanho > (CONFIG_MAX + 8000 if self.path.startswith("/api/admin/config") or self.path.startswith("/api/admin/ia") else 20000):
                 return self._json(413, {"ok": False, "erro": "grande demais"})
             bruto = self.rfile.read(tamanho)
+            if self.path.startswith("/api/mp/aviso"):
+                return self._aviso_mp(bruto)
             if self.path.startswith("/api/pagamento/confirmar"):
                 try:
                     novo = webhook_pagamento(bruto, self.headers.get("X-Assinatura", ""))
@@ -1201,6 +1324,10 @@ class Api(BaseHTTPRequestHandler):
                         kv_gravar("marca_" + k, v)
                         MARCA[k] = v
                     return self._json(200, {"ok": True})
+                if acao == "mp":
+                    if corpo.get("token"):
+                        return self._json(200, {"ok": True, "mp": mp_salvar_token(uid, corpo.get("token"))})
+                    return self._json(200, {"ok": True, "mp": mp_info()})
                 if acao == "zerar":
                     return self._json(200, {"ok": True, "temporada": zerar_jogadores(uid)})
                 return self._json(404, {"ok": False})
