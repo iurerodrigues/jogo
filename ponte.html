@@ -1,0 +1,8 @@
+<!doctype html><meta charset="utf-8"><title>ponte</title>
+<script>
+// Entrega um arquivo público do jogo (artes de divulgação) para a página que abriu este quadro.
+const q = new URLSearchParams(location.search).get('f') || '';
+if (/^marca\/[a-z0-9_\/.-]+\.(png|jpg|mp4)$/i.test(q)) {
+  fetch(q).then(r => r.arrayBuffer()).then(buf => parent.postMessage({ ponte: q, buf }, '*', [buf]));
+}
+</script>
