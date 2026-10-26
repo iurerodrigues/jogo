@@ -78,7 +78,7 @@ COMANDOS_BOT = [
 BANCO = os.environ.get("BANCO", "/opt/bot/dados.db")
 PORTA = int(os.environ.get("PORTA", "8080"))
 ORIGENS = {"https://iurerodrigues.github.io"}
-VERSAO = "3.8"
+VERSAO = "3.9"
 
 # Precos em estrelas. Devem bater com PACOTES_VIP do jogo.
 # Pacotes de Cristais (moeda VIP) vendidos em Telegram Stars
@@ -815,8 +815,9 @@ def marcar_chave(con, uid, chave):
 def vip_ativo(con, uid):
     """O Passe VIP comprado com Cristais vale 30 dias (somando compras)."""
     ate = 0
-    for l in con.execute("SELECT criado FROM compras WHERE uid=? AND pacote='passe' ORDER BY criado", (uid,)):
-        ate = max(ate, l["criado"]) + 30 * 86400
+    for l in con.execute("SELECT criado, pacote FROM compras WHERE uid=? AND (pacote='passe' OR pacote LIKE 'vipd:%') ORDER BY criado", (uid,)):
+        dias = 30 if l["pacote"] == "passe" else _int(l["pacote"][5:], 0, 365)
+        ate = max(ate, l["criado"]) + dias * 86400
     return ate > time.time()
 
 
@@ -1043,7 +1044,7 @@ def moedas_acao(usuario, dados):
         if aviso:
             resp["aviso"] = aviso
     if convidou:
-        threading.Thread(target=_avisar_convite, args=(convidou, uid), daemon=True).start()
+        threading.Thread(target=_avisar_convite, args=(convidou,), daemon=True).start()
     return resp
 
 
@@ -1302,7 +1303,7 @@ def tratar_mensagem(msg):
             enviar(chat, "A comunidade oficial está chegando! Fique de olho.", teclado_jogar(grupo))
     elif texto.startswith("/convidar"):
         link = "https://t.me/%s?start=ref_%d" % (BOT_USUARIO, usuario.get("id", 0))
-        enviar(chat, "\U0001F381 Convide seus amigos para o DOMA!\n\nQuando o amigo chegar ao Lv %d de treinador, vocês DOIS ganham \U0001F48E %d Cristais.\n\nSeu link de convite:\n%s" % (CONVITE_NIVEL, CONVITE_CRISTAIS, link),
+        enviar(chat, "\U0001F381 Convide seus amigos para o DOMA!\n\nQuando o amigo entra no jogo, voc\u00eas DOIS j\u00e1 ganham pr\u00eamios. E ganham mais quando ele chega ao Lv 5, 10, 20, 30 e 50: Moedas, Cristais, itens e at\u00e9 VIP!\n\nSeu link de convite:\n%s" % (link,),
                {"inline_keyboard": [[{"text": "\U0001F4E4 Enviar convite", "url": "https://t.me/share/url?url=%s&text=%s" % (urllib.parse.quote(link), urllib.parse.quote("Bora DOMA! \U0001F43E Um RPG de feras direto no Telegram. Joga comigo:"))}]]})
     elif texto.startswith("/ranking"):
         top = top_ranking(10)
@@ -1565,6 +1566,27 @@ class Api(BaseHTTPRequestHandler):
                     return self._json(200, {"ok": True, "mp": mp_info()})
                 if acao == "zerar":
                     return self._json(200, {"ok": True, "temporada": zerar_jogadores(uid)})
+                return self._json(404, {"ok": False})
+            if self.path.startswith("/api/convites/meus"):
+                r = convites_meus(uid)
+                r["ok"] = True
+                return self._json(200, r)
+            if self.path.startswith("/api/codigo/resgatar"):
+                r = codigo_resgatar(usuario, corpo)
+                r["ok"] = True
+                return self._json(200, r)
+            if self.path.startswith("/api/admin/codigos/"):
+                acao = self.path.split("/api/admin/codigos/")[1].split("?")[0]
+                try:
+                    if acao == "criar":
+                        return self._json(200, {"ok": True, "codigo": codigo_criar(uid, corpo)})
+                    if acao == "listar":
+                        return self._json(200, {"ok": True, "codigos": codigo_listar(uid)})
+                    if acao == "ativar":
+                        codigo_ativar(uid, corpo.get("codigo", ""), corpo.get("ativo"))
+                        return self._json(200, {"ok": True})
+                except PermissionError:
+                    return self._json(403, {"ok": False, "erro": "so administrador"})
                 return self._json(404, {"ok": False})
             if self.path.startswith("/api/moedas"):
                 r = moedas_acao(usuario, corpo)
@@ -2428,36 +2450,225 @@ def registrar_convite(novo_uid, codigo):
     if quem == novo_uid:
         return
     with _trava_banco, banco() as con:
-        con.execute("CREATE TABLE IF NOT EXISTS convites (uid INTEGER PRIMARY KEY, por INTEGER, pago INTEGER DEFAULT 0, criado REAL)")
+        _tabela_convites(con)
         ja = con.execute("SELECT 1 FROM carteira WHERE uid=?", (novo_uid,)).fetchone()
         if ja:
             return  # so vale para jogador novo
         con.execute("INSERT OR IGNORE INTO convites (uid, por, criado) VALUES (?,?,?)", (novo_uid, quem, time.time()))
 
 
-def _avisar_convite(quem, novo):
-    for chat, txt in ((quem, "\U0001F381 Um amigo que voc\u00ea convidou chegou ao Lv %d! Voc\u00ea ganhou \U0001F48E %d Cristais." % (CONVITE_NIVEL, CONVITE_CRISTAIS)),
-                      (novo, "\U0001F381 Voc\u00ea chegou ao Lv %d! Por ter vindo por convite, ganhou \U0001F48E %d Cristais." % (CONVITE_NIVEL, CONVITE_CRISTAIS))):
+# Marcos do convite: (nivel do convidado, premio de quem convidou, premio do convidado)
+# nivel 1 = acabou de entrar no jogo. Premio: m=Moedas, c=Cristais, vip=dias, itens={chave: qtd}
+CONVITE_MARCOS = [
+    (1,  {"m": 1500},                                  {"m": 1000, "itens": {"pocao": 5}}),
+    (5,  {"m": 3000, "itens": {"superEsfera": 3}},     {"m": 2000, "itens": {"superEsfera": 2}}),
+    (10, {"c": 5},                                     {"c": 5}),
+    (20, {"c": 10, "itens": {"doceRaro": 1}},          {"c": 5, "itens": {"doceRaro": 1}}),
+    (30, {"c": 15, "vip": 3},                          {"c": 10}),
+    (50, {"c": 30, "vip": 7},                          {"c": 20, "vip": 3}),
+]
+CONVITE_ENTRADAS_DIA = 20  # teto de premios de "amigo entrou" por dia para quem convida
+
+
+def _texto_premio(pr):
+    nomes = {"pocao": "Poção", "superEsfera": "Super Esfera", "doceRaro": "Doce Raro"}
+    p = []
+    if pr.get("m"):
+        p.append("\U0001F4B0 %s Moedas" % format(pr["m"], ",").replace(",", "."))
+    if pr.get("c"):
+        p.append("\U0001F48E %d Cristais" % pr["c"])
+    if pr.get("vip"):
+        p.append("\U0001F451 VIP por %d dias" % pr["vip"])
+    for k, q in (pr.get("itens") or {}).items():
+        p.append("%dx %s" % (q, nomes.get(k, k)))
+    return " + ".join(p)
+
+
+def _dar_premio(con, uid, pr, ref):
+    if pr.get("c"):
+        creditar(con, uid, pr["c"])
+    if pr.get("m"):
+        con.execute("UPDATE carteira SET moedas = moedas + ? WHERE uid=?", (pr["m"], uid))
+    entregas = (["vipd:%d" % pr["vip"]] if pr.get("vip") else []) + ["item:%s:%d" % (k, q) for k, q in (pr.get("itens") or {}).items()]
+    for i, pac in enumerate(entregas):
+        try:
+            con.execute("INSERT INTO compras (uid, pacote, estrelas, cobranca, criado) VALUES (?,?,0,?,?)",
+                        (uid, pac, "convite:%s:%d:%d" % (ref, uid, i), int(time.time())))
+        except sqlite3.IntegrityError:
+            pass
+
+
+def _avisar_convite(avisos):
+    for chat, txt in avisos:
         try:
             enviar(chat, txt, teclado_jogar())
         except Exception:
             pass
 
 
-def pagar_convites(con, uid, nv):
-    """Chamado no sync da carteira: paga o convite quando o convidado chega ao nivel."""
+def _tabela_convites(con):
     con.execute("CREATE TABLE IF NOT EXISTS convites (uid INTEGER PRIMARY KEY, por INTEGER, pago INTEGER DEFAULT 0, criado REAL)")
-    l = con.execute("SELECT por, pago FROM convites WHERE uid=?", (uid,)).fetchone()
-    if not l or l["pago"] or nv < CONVITE_NIVEL:
+    cols = [c[1] for c in con.execute("PRAGMA table_info(convites)")]
+    if "marco" not in cols:
+        con.execute("ALTER TABLE convites ADD COLUMN marco INTEGER DEFAULT -1")
+        con.execute("ALTER TABLE convites ADD COLUMN pago_em REAL DEFAULT 0")
+        # quem ja recebeu o premio antigo do Lv 10 nao recebe de novo os marcos ate o Lv 10
+        con.execute("UPDATE convites SET marco=2 WHERE pago=1")
+
+
+def pagar_convites(con, uid, nv):
+    """Chamado no sync da carteira: paga cada marco que o convidado alcancou. Devolve os avisos a mandar."""
+    _tabela_convites(con)
+    l = con.execute("SELECT por, marco FROM convites WHERE uid=?", (uid,)).fetchone()
+    if not l:
         return None
-    con.execute("UPDATE convites SET pago=1 WHERE uid=?", (uid,))
-    creditar(con, l["por"], CONVITE_CRISTAIS)
-    creditar(con, uid, CONVITE_CRISTAIS)
-    return l["por"]
+    feito = l["marco"] if l["marco"] is not None else -1
+    avisos = []
+    for idx, (nivel, p_quem, p_novo) in enumerate(CONVITE_MARCOS):
+        if idx <= feito or nv < nivel:
+            continue
+        dar_quem = True
+        if nivel == 1:
+            hoje = con.execute("SELECT COUNT(*) n FROM convites WHERE por=? AND marco>=0 AND pago_em>?", (l["por"], time.time() - 86400)).fetchone()["n"]
+            dar_quem = hoje < CONVITE_ENTRADAS_DIA
+        if dar_quem:
+            _dar_premio(con, l["por"], p_quem, "%d:%d" % (uid, idx))
+        _dar_premio(con, uid, p_novo, "%d:%d" % (uid, idx))
+        con.execute("UPDATE convites SET marco=?, pago_em=?, pago=? WHERE uid=?", (idx, time.time(), 1 if nivel >= 10 else 0, uid))
+        if nivel == 1:
+            if dar_quem:
+                avisos.append((l["por"], "\U0001F389 Um amigo que você convidou acabou de entrar no DOMA! Você ganhou %s.\n\nQuanto mais ele evoluir, mais prêmios vocês ganham: Lv 5, 10, 20, 30 e 50." % _texto_premio(p_quem)))
+            avisos.append((uid, "\U0001F381 Bem-vindo! Por ter vindo por convite, você ganhou %s.\n\nChegue ao Lv 5, 10, 20, 30 e 50 para ganhar mais prêmios (e seu amigo também)." % _texto_premio(p_novo)))
+        else:
+            avisos.append((l["por"], "\U0001F381 Um amigo que você convidou chegou ao Lv %d! Você ganhou %s." % (nivel, _texto_premio(p_quem))))
+            avisos.append((uid, "\U0001F381 Você chegou ao Lv %d! Por ter vindo por convite, ganhou %s." % (nivel, _texto_premio(p_novo))))
+        feito = idx
+    return avisos or None
+
+
+def convites_meus(uid):
+    with _trava_banco, banco() as con:
+        _tabela_convites(con)
+        linhas = con.execute("SELECT marco FROM convites WHERE por=?", (uid,)).fetchall()
+    return {"total": len(linhas), "ativos": sum(1 for l in linhas if l["marco"] is not None and l["marco"] >= 0),
+            "marcos": [{"nivel": n, "quem": _texto_premio(a), "novo": _texto_premio(b)} for n, a, b in CONVITE_MARCOS]}
+
+
+
+# --- codigos promocionais (o ADM cria, o jogador resgata uma vez) ---
+CODIGO_RE = re.compile(r"^[A-Z0-9]{3,20}$")
+
+
+def _tabelas_codigos(con):
+    con.execute("""CREATE TABLE IF NOT EXISTS codigos (
+        codigo TEXT PRIMARY KEY, premio TEXT NOT NULL, usos_max INTEGER NOT NULL DEFAULT 0,
+        usos INTEGER NOT NULL DEFAULT 0, expira INTEGER NOT NULL DEFAULT 0, novos_dias INTEGER NOT NULL DEFAULT 0,
+        ativo INTEGER NOT NULL DEFAULT 1, criado INTEGER NOT NULL, por INTEGER)""")
+    con.execute("""CREATE TABLE IF NOT EXISTS codigos_uso (
+        codigo TEXT NOT NULL, uid INTEGER NOT NULL, criado INTEGER NOT NULL, PRIMARY KEY (codigo, uid))""")
+
+
+def _premio_codigo(dados):
+    pr = {"vip": _int(dados.get("vip", 0), 0, 365), "cristais": _int(dados.get("cristais", 0), 0, 100000),
+          "moedas": _int(dados.get("moedas", 0), 0, 10000000), "itens": {}}
+    for k, q in (dados.get("itens") or {}).items():
+        k = str(k)
+        if k in (TABELAS.get("itens") or {}):
+            q = _int(q, 0, 999)
+            if q:
+                pr["itens"][k] = q
+    if not (pr["vip"] or pr["cristais"] or pr["moedas"] or pr["itens"]):
+        raise ValueError("codigo sem premio")
+    return pr
+
+
+def codigo_criar(uid, dados):
+    if not eh_admin(uid):
+        raise PermissionError()
+    cod = re.sub(r"\s+", "", str(dados.get("codigo", ""))).upper()
+    if not CODIGO_RE.match(cod):
+        raise ValueError("codigo invalido")
+    premio = _premio_codigo(dados)
+    dias = _int(dados.get("dias", 0), 0, 3650)
+    with _trava_banco, banco() as con:
+        _tabelas_codigos(con)
+        if con.execute("SELECT 1 FROM codigos WHERE codigo=?", (cod,)).fetchone():
+            raise ValueError("codigo ja existe")
+        con.execute("INSERT INTO codigos (codigo, premio, usos_max, expira, novos_dias, criado, por) VALUES (?,?,?,?,?,?,?)",
+                    (cod, json.dumps(premio), _int(dados.get("usos_max", 0), 0, 1000000),
+                     int(time.time()) + dias * 86400 if dias else 0, _int(dados.get("novos_dias", 0), 0, 365), int(time.time()), uid))
+    return cod
+
+
+def codigo_listar(uid):
+    if not eh_admin(uid):
+        raise PermissionError()
+    with _trava_banco, banco() as con:
+        _tabelas_codigos(con)
+        linhas = con.execute("SELECT * FROM codigos ORDER BY criado DESC LIMIT 100").fetchall()
+    agora = time.time()
+    return [{"codigo": l["codigo"], "premio": json.loads(l["premio"]), "usos": l["usos"], "usos_max": l["usos_max"],
+             "expira": l["expira"], "novos_dias": l["novos_dias"],
+             "ativo": bool(l["ativo"]) and not (l["expira"] and l["expira"] < agora) and not (l["usos_max"] and l["usos"] >= l["usos_max"])}
+            for l in linhas]
+
+
+def codigo_ativar(uid, cod, ativo):
+    if not eh_admin(uid):
+        raise PermissionError()
+    with _trava_banco, banco() as con:
+        _tabelas_codigos(con)
+        con.execute("UPDATE codigos SET ativo=? WHERE codigo=?", (1 if ativo else 0, str(cod).upper()))
+
+
+def codigo_resgatar(usuario, dados):
+    uid = usuario["id"]
+    if not limitar_taxa("cod:%d" % uid, 8):
+        raise ValueError("muitas tentativas")
+    cod = re.sub(r"\s+", "", str(dados.get("codigo", ""))).upper()
+    if not CODIGO_RE.match(cod):
+        raise ValueError("codigo nao existe")
+    agora = int(time.time())
+    with _trava_banco, banco() as con:
+        _tabelas_codigos(con)
+        preparar_carteira(con)
+        l = con.execute("SELECT * FROM codigos WHERE codigo=?", (cod,)).fetchone()
+        if not l or not l["ativo"]:
+            raise ValueError("codigo nao existe")
+        if l["expira"] and l["expira"] < agora:
+            raise ValueError("codigo expirado")
+        if l["usos_max"] and l["usos"] >= l["usos_max"]:
+            raise ValueError("codigo esgotado")
+        c = carteira(con, uid)
+        if l["novos_dias"] and c["criado"] < agora - l["novos_dias"] * 86400:
+            raise ValueError("so para novos")
+        try:
+            con.execute("INSERT INTO codigos_uso (codigo, uid, criado) VALUES (?,?,?)", (cod, uid, agora))
+        except sqlite3.IntegrityError:
+            raise ValueError("codigo ja usado")
+        con.execute("UPDATE codigos SET usos = usos + 1 WHERE codigo=?", (cod,))
+        pr = json.loads(l["premio"])
+        if pr.get("cristais"):
+            creditar(con, uid, int(pr["cristais"]))
+        if pr.get("moedas"):
+            con.execute("UPDATE carteira SET moedas = moedas + ? WHERE uid=?", (int(pr["moedas"]), uid))
+        # VIP e itens vao pela fila de entregas (o jogo recebe em /api/resgatar)
+        entregas = []
+        if pr.get("vip"):
+            entregas.append("vipd:%d" % int(pr["vip"]))
+        for k, q in (pr.get("itens") or {}).items():
+            entregas.append("item:%s:%d" % (k, int(q)))
+        for i, pac in enumerate(entregas):
+            con.execute("INSERT INTO compras (uid, pacote, estrelas, cobranca, criado) VALUES (?,?,0,?,?)",
+                        (uid, pac, "codigo:%s:%d:%d" % (cod, uid, i), agora))
+        moedas = con.execute("SELECT moedas FROM carteira WHERE uid=?", (uid,)).fetchone()["moedas"]
+        cristais = ver_saldo_con(con, uid)
+    log("codigo resgatado", cod, uid)
+    return {"premio": pr, "moedas": moedas, "cristais": cristais}
 
 
 # --- troca de bot e nova temporada ---
-TABELAS_MANTIDAS = {"admins", "config_jogo", "segredos", "kv", "compras", "pedidos", "sqlite_sequence"}
+TABELAS_MANTIDAS = {"admins", "config_jogo", "segredos", "kv", "compras", "pedidos", "codigos", "sqlite_sequence"}
 _temporada_cache = [None]
 
 
